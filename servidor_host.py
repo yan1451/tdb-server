@@ -15,9 +15,9 @@ import frida
 JOGO = os.environ.get("TDB_JOGO", r"C:\Games\THE DAY BEFORE")
 WD = os.path.join(JOGO, r"Survival\Binaries\Win64")
 EXE = os.path.join(WD, "TheDayBefore.exe")
-AQUI = os.path.dirname(os.path.abspath(__file__))           # ...\host
+AQUI = os.path.dirname(os.path.abspath(__file__))
 FRIDA = os.path.join(AQUI, "scripts")                         # scripts Frida do host
-SERVICOS = os.path.join(os.path.dirname(AQUI), "servicos")    # ...\servicos
+SERVICOS = os.path.join(AQUI, "servicos")
 PY = sys.executable
 TMP = os.environ["TEMP"]
 # 06/11: opcoes
@@ -32,14 +32,11 @@ PORTA = int(sys.argv[sys.argv.index("--porta") + 1]) if "--porta" in sys.argv el
 OUT = os.path.join(TMP, "servidor_host%s%s.out" % ("_headless" if SEM_INTERFACE else "", "" if PORTA == 7777 else "_%d" % PORTA))
 # tdb_connectex_test.js (copia do cliente) vem DEPOIS do ssl_unpin.js: o ssl_unpin desvia antes os IPs de autenticacao
 # para 127.0.0.1:8080; o resto do Google:443 (Firestore gRPC) vai para o terminador TLS -> emulador, desde a abertura.
-SCRIPTS = ["ssl_unpin.js", "tdb_connectex_test.js", "fake_server_join.js", "host_flow_servidor.js",
+SCRIPTS = ["appdata_separado.js", "ssl_unpin.js", "tdb_connectex_test.js", "fake_server_join.js", "host_flow_servidor.js",
            "modo_dedicado.js", "listen_nativo.js", "replicacao.js", "replicacao_donos.js", "replicacao_distancia.js", "disparar_onserverload.js"]
-# LocalAppData proprio (06/11): na porta de teste (ou com --appdata-separado) a instancia usa outra pasta LocalAppData, porque o banco
-# local do Firestore (LevelDB com LOCK) em %LOCALAPPDATA%\firestore so abre em um processo por usuario (a 2a instancia caia).
-APPDATA_SEPARADO = ("--appdata-separado" in sys.argv) or PORTA != 7777
+# Sempre isola o host por porta: o cliente conserva o LocalAppData original, sem disputar o LOCK do Firestore.
+# --appdata-separado continua aceito por compatibilidade, mas agora este e o padrao.
 APPDATA_DIR = os.path.join(os.environ["LOCALAPPDATA"], "TDB_instancia_%d" % PORTA)
-if APPDATA_SEPARADO:
-    SCRIPTS.insert(0, "appdata_separado.js")
 if "--diag-excecao" in sys.argv:   # 06/11: registra excecoes C++ (tipo, what, backtrace) - investigacao da 2a instancia
     SCRIPTS.insert(0, "captura_excecao.js")
 # F8 automatico (--sem-interface): feito DENTRO do host_flow_servidor.js (autoF8Tick, ativado por `var AUTO_F8_MS`).
@@ -126,7 +123,8 @@ def criar_servidor_na_lista():
               "Name": {"stringValue": "SERVIDOR-LOCAL"}, "DisplayName": {"stringValue": "SERVIDOR-LOCAL"}}
     req = urllib.request.Request(LISTA_URL, data=json.dumps({"fields": campos}).encode(), method="PATCH",
                                  headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(req, timeout=10).read()
+    with urllib.request.urlopen(req, timeout=10) as resposta:
+        resposta.read()
 
 # ---- 0. pre-requisitos ----
 if not os.path.exists(EXE):
@@ -149,18 +147,19 @@ else:
     log("ok: Firestore ja em 127.0.0.1:8081")
 if not escutando_tcp(8081, "::1"):
     iniciar([PY, "-I", os.path.join(SERVICOS, "ipv6_bridge.py")], SERVICOS, "ipv6_bridge")
-    esperar(lambda: escutando_tcp(8081, "::1"), 15, "ponte IPv6 [::1]:8081")
+    if not esperar(lambda: escutando_tcp(8081, "::1"), 15, "ponte IPv6 [::1]:8081"): sys.exit(1)
 else:
     log("ok: ponte IPv6 ja em [::1]:8081")
 if not escutando_tcp(443, "127.0.0.1"):
     iniciar([PY, os.path.join(TLS, "tls_front.py")], TLS, "tls_front")
-    esperar(lambda: escutando_tcp(443, "127.0.0.1"), 15, "terminador TLS 127.0.0.1:443")
+    if not esperar(lambda: escutando_tcp(443, "127.0.0.1"), 15, "terminador TLS 127.0.0.1:443"): sys.exit(1)
 else:
     log("ok: terminador TLS ja em 443")
+if not esperar(lambda: escutando_tcp(443, "::1"), 15, "terminador TLS [::1]:443"): sys.exit(1)
 try:
     criar_servidor_na_lista(); log("ok: SERVIDOR-LOCAL (127.0.0.1:%d) na lista de servidores" % PORTA)
-except Exception as e:
-    log("AVISO: nao consegui gravar o servidor na lista (%s)" % e)
+except OSError as e:
+    log("ABORTADO: nao consegui gravar o servidor na lista (%s)" % e); sys.exit(1)
 
 # ---- 2. porta 7777 ----
 out = ps("Get-NetUDPEndpoint -LocalPort %d -ErrorAction SilentlyContinue | ForEach-Object { $p=$_.OwningProcess; $c=(Get-CimInstance Win32_Process -Filter \"ProcessId=$p\").CommandLine; \"$p|$c\" }" % PORTA)
@@ -196,12 +195,9 @@ dev = frida.get_local_device()
 janela = ["-nullrhi", "-nosound"] if SEM_INTERFACE else ["-windowed", "-ResX=1280", "-ResY=720"]
 log("modo: %s, %s, porta %d, log %s" % ("SEM INTERFACE (-nullrhi -nosound, F8 automatico)" if SEM_INTERFACE else "com janela (apertar F8)",
                                         "LEVE" if LEVE else "DIAGNOSTICO (--diag)", PORTA, OUT))
-env_jogo = None
-if APPDATA_SEPARADO:
-    env_jogo = dict(os.environ); env_jogo["LOCALAPPDATA"] = APPDATA_DIR
-    log("LocalAppData desta instancia: " + APPDATA_DIR)
-pid = dev.spawn([EXE] + janela + ["-Port=%d" % PORTA, "-FullStdOutLogOutput"], cwd=WD, env=env_jogo) if env_jogo else \
-      dev.spawn([EXE] + janela + ["-Port=%d" % PORTA, "-FullStdOutLogOutput"], cwd=WD)
+env_jogo = dict(os.environ); env_jogo["LOCALAPPDATA"] = APPDATA_DIR
+log("LocalAppData desta instancia: " + APPDATA_DIR)
+pid = dev.spawn([EXE] + janela + ["-Port=%d" % PORTA, "-FullStdOutLogOutput"], cwd=WD, env=env_jogo)
 sess = dev.attach(pid)
 vivo = {"v": True}
 def on_detached(reason, crash=None):
