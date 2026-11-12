@@ -11,6 +11,10 @@ CODIGOS = tuple(NOMES)
 
 TEXTOS = {
     "pt": {
+        "b_diag": "Gerar diagnóstico",
+        "dlg_diag_ok": "Arquivo gerado:\n{arq}\n\nEnvie esse arquivo para quem está ajudando. Ele tem os logs e o estado do seu save local (nenhuma senha).",
+        "diag_gerado": "diagnóstico gerado: {arq}",
+        "err_diag": "falha ao gerar o diagnóstico",
         "titulo": "The Day Before — servidor da comunidade",
         "idioma": "Idioma:",
         "srv_verificando": "Servidor online: verificando...",
@@ -75,6 +79,10 @@ TEXTOS = {
         "forca_tudo": "o launcher não voltou sozinho: encerrando tudo à força",
     },
     "en": {
+        "b_diag": "Create diagnostics",
+        "dlg_diag_ok": "File created:\n{arq}\n\nSend this file to whoever is helping you. It has the logs and the state of your local save (no passwords).",
+        "diag_gerado": "diagnostics created: {arq}",
+        "err_diag": "failed to create the diagnostics",
         "titulo": "The Day Before — community server",
         "idioma": "Language:",
         "srv_verificando": "Online server: checking...",
@@ -139,6 +147,10 @@ TEXTOS = {
         "forca_tudo": "the launcher did not recover on its own: forcing everything to close",
     },
     "es": {
+        "b_diag": "Generar diagnóstico",
+        "dlg_diag_ok": "Archivo generado:\n{arq}\n\nEnvía este archivo a quien te está ayudando. Tiene los registros y el estado de tu guardado local (ninguna contraseña).",
+        "diag_gerado": "diagnóstico generado: {arq}",
+        "err_diag": "fallo al generar el diagnóstico",
         "titulo": "The Day Before — servidor de la comunidad",
         "idioma": "Idioma:",
         "srv_verificando": "Servidor en línea: comprobando...",
@@ -203,6 +215,10 @@ TEXTOS = {
         "forca_tudo": "el launcher no se recuperó solo: forzando el cierre de todo",
     },
     "ru": {
+        "b_diag": "Создать диагностику",
+        "dlg_diag_ok": "Файл создан:\n{arq}\n\nОтправьте этот файл тому, кто вам помогает. В нём журналы и состояние вашего локального сохранения (без паролей).",
+        "diag_gerado": "диагностика создана: {arq}",
+        "err_diag": "не удалось создать диагностику",
         "titulo": "The Day Before — сервер сообщества",
         "idioma": "Язык:",
         "srv_verificando": "Онлайн-сервер: проверка...",

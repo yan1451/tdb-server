@@ -28,6 +28,7 @@ RAIZ = AQUI.parent
 sys.path.insert(0, str(AQUI))
 import atualizador  # noqa: E402
 import idiomas  # noqa: E402
+import diagnostico  # noqa: E402
 
 CFG_ARQ = AQUI / "config.json"
 CLIENTE = RAIZ / "cliente" / "cliente_conecta.py"
@@ -244,6 +245,8 @@ class Launcher:
         self.chk_barras = tk.Checkbutton(opc, text=self.t("chk_barras"), variable=self.v_barras, bg=fundo, fg=sec, selectcolor="#2a2f37",
                                          activebackground=fundo, activeforeground=texto, command=self._salvar_opcoes)
         self.chk_barras.pack(side="left")
+        self.b_diag = tk.Button(opc, text=self.t("b_diag"), command=self.gerar_diag, **estilo2)   # 12/11: junta logs e estado do save num .zip
+        self.b_diag.pack(side="right")
 
         self.txt = scrolledtext.ScrolledText(r, bg="#0e1013", fg="#cfd6dd", insertbackground="white", font=("Consolas", 9), relief="flat", height=14)
         self.txt.pack(fill="both", expand=True, padx=16, pady=(8, 14))
@@ -309,6 +312,7 @@ class Launcher:
         self.b_parar.configure(text=self.t("b_parar"))
         self.b_atualizar.configure(text=self.t("b_atualizar"))
         self.b_log.configure(text=self.t("b_log"))
+        self.b_diag.configure(text=self.t("b_diag"))
         self.w_pasta.configure(text=self.t("w_pasta"))
         self.b_escolher.configure(text=self.t("b_escolher"))
         self.chk_barras.configure(text=self.t("chk_barras"))
@@ -349,6 +353,8 @@ class Launcher:
                     self._botoes(val)
                 elif tipo == "reiniciar":
                     self._reiniciar_launcher()
+                elif tipo == "info":
+                    messagebox.showinfo("TDB Launcher", val, parent=self.r)
                 elif tipo == "aviso":
                     messagebox.showerror("TDB Launcher", val, parent=self.r)
         except queue.Empty:
@@ -623,6 +629,21 @@ class Launcher:
 
     def abrir_logs(self):
         os.startfile(str(CLIENTE.parent))
+
+    def gerar_diag(self):
+        """Gera um .zip na Area de Trabalho com logs, versoes e o estado do save local; a pessoa so envia o arquivo."""
+        def t():
+            try:
+                arq = diagnostico.gerar(RAIZ, AQUI, self.cfg)
+                self.logk("diag_gerado", arq=str(arq))
+                self.fila.put(("info", self.t("dlg_diag_ok", arq=str(arq))))
+                try:
+                    subprocess.Popen(["explorer", "/select,", str(arq)])
+                except Exception:
+                    pass
+            except Exception as e:
+                self.erro("err_diag", e)
+        self._rodar("gerar diagnostico", t, limpar=False)
 
     def abrir_log_launcher(self):
         gravar_log("")
