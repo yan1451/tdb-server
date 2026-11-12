@@ -28,11 +28,11 @@ const TXT = {
 const T = TXT[IDIOMA_CFG] || TXT.en;
 
 // memoria compartilhada com o C: cfg[0] hud, cfg[1] fReceiveDrawHUD, cfg[2] fDrawText, cfg[3] ligado, cfg[4] nLinhas, cfg[5] ProcessEvent, cfg[6] contador de quadros
-const cfg = Memory.alloc(10 * 8); for (let i = 0; i < 10; i++) cfg.add(i * 8).writeU64(0);
+const cfg = Memory.alloc(12 * 8); for (let i = 0; i < 12; i++) cfg.add(i * 8).writeU64(0);   // cfg[9] = largura da tela (SizeX do ReceiveDrawHUD), cfg[10] = FPS/ping ligado
 const MAXR = 12, rct = Memory.alloc(MAXR * 0x20);   // HUD_DrawRect por retangulo (0x20); cfg[7] = quantidade, cfg[8] = UFunction DrawRect
-const lin = Memory.alloc(MAXL * 0x40);                  // HUD_DrawText por linha (0x38)
-const txt = Memory.alloc(MAXL * CAP * 2);               // texto UTF-16 por linha
-for (let k = 0; k < MAXL; k++) {
+const lin = Memory.alloc((MAXL + 1) * 0x40);   // linha MAXL = FPS/ping no canto superior direito                  // HUD_DrawText por linha (0x38)
+const txt = Memory.alloc((MAXL + 1) * CAP * 2);               // texto UTF-16 por linha
+for (let k = 0; k <= MAXL; k++) {
   const p = lin.add(k * 0x40); p.writeByteArray(new Array(0x40).fill(0));
   p.writePointer(txt.add(k * CAP * 2)); p.add(8).writeS32(0); p.add(12).writeS32(CAP);
   p.add(0x10).writeFloat(1.0); p.add(0x14).writeFloat(1.0); p.add(0x18).writeFloat(1.0); p.add(0x1c).writeFloat(1.0);   // branco
@@ -54,7 +54,7 @@ const BX = 30, BW = 130, BH = 6, COR_VIDA = [0.348, 0.325, 0.255];
 const cm = new CModule(`
 #include <gum/guminterceptor.h>
 #include <stdint.h>
-extern uint64_t cfg[10];
+extern uint64_t cfg[12];
 extern uint8_t lin[];
 extern uint8_t rct[];
 typedef void (*PE) (void *, void *, void *);
@@ -66,6 +66,8 @@ void onEnter (GumInvocationContext * ic)
   {
     int k, n = (int) cfg[4];
     cfg[6]++;
+    cfg[9] = (uint64_t) *(int *) gum_invocation_context_get_nth_argument (ic, 2);
+    if (cfg[3] && cfg[5] != 0 && cfg[10]) ((PE) cfg[5]) (o, (void *) cfg[2], lin + 6 * 0x40);
     if (cfg[3] && cfg[5] != 0)
       for (k = 0; k < n && k < 6; k++) ((PE) cfg[5]) (o, (void *) cfg[2], lin + k * 0x40);
     if (cfg[3] && cfg[5] != 0 && cfg[8] != 0)
@@ -109,7 +111,7 @@ function passoHud() {
   if (!anexado) {
     anexado = true;
     Interceptor.attach(B.add(0x24077b0), cm);
-    setInterval(atualizar, 300); setInterval(reescanear, 20000); setInterval(vigiar, 5000);
+    setInterval(atualizar, 300); setInterval(reescanear, 20000); setInterval(vigiar, 5000); setInterval(fpsPing, 500);
     log('HUD do grupo ativa (hud ' + hud + ')');
   } else log('HUD do grupo reativada (novo hud ' + hud + ')');
   cfg.add(24).writeU64(1); reescanear();
@@ -123,8 +125,8 @@ function vigiar() {
 }
 
 // 2) membros do grupo: PS_TDB_C vivos (varredura em fatias a cada 20 s) + leitura barata a cada 2 s
-let pss = [], pws = [], j = 0, varrendo = false, novos = [], novosP = [];
-function reescanear() { if (varrendo || !refrescar()) return; varrendo = true; j = 0; novos = []; novosP = []; passoPS(); }
+let pss = [], pws = [], j = 0, varrendo = false, novos = [], novosP = [], pcl = ptr(0), novoPC = ptr(0);
+function reescanear() { if (varrendo || !refrescar()) return; varrendo = true; j = 0; novos = []; novosP = []; novoPC = ptr(0); passoPS(); }
 function passoPS() {
   const fim = Math.min(j + 3000, num);
   for (; j < fim; j++) {
@@ -135,13 +137,27 @@ function passoPS() {
       if (it.add(8).readS32() & MORTO) continue; if (o.add(8).readS32() & 0x10) continue;
       const cn = classe(o);
       if (cn === 'PS_TDB_C') novos.push(o);
+      else if (cn === 'SurvPC_C') novoPC = o;
       else if (cn === 'SurvivalPlayer_V2_C' && !o.add(0x898).readPointer().isNull()) novosP.push(o);
     } catch (e) {}
   }
   if (j < num) { setTimeout(passoPS, 25); return; }
-  pss = novos; pws = novosP; varrendo = false;
+  pss = novos; pws = novosP; if (!novoPC.isNull()) pcl = novoPC; varrendo = false;
 }
 let ultimo = '';
+// FPS (quadros em que a HUD e desenhada por segundo, suavizado) e ping (PlayerState local, CompressedPing +0x298 = ping/4 ms) no canto superior direito
+let fAnt = 0, tAnt = Date.now(), fpsS = 0;
+function fpsPing() {
+  try {
+    const c = cfg.add(48).readU64().toNumber(), t = Date.now(); if (t - tAnt < 400) return;
+    const fps = (c - fAnt) * 1000 / (t - tAnt); fAnt = c; tAnt = t; fpsS = fpsS ? fpsS * 0.6 + fps * 0.4 : fps;
+    let ping = '';
+    if (!pcl.isNull() && classe(pcl) === 'SurvPC_C') { const ps = pcl.add(0x298).readPointer(); if (!ps.isNull()) ping = '  |  ' + (ps.add(0x298).readU8() * 4) + ' ms'; }
+    const sx = cfg.add(72).readU64().toNumber();
+    linha(MAXL, 'FPS ' + Math.round(fpsS) + ping, false, 12); lin.add(MAXL * 0x40).add(0x20).writeFloat(Math.max(100, sx - 190));
+    cfg.add(80).writeU64(1);
+  } catch (e) {}
+}
 // HP: BPC_PlayerStatsComponent (pawn+0x898).Stats (TMap<EStatType,double> +0x180; passo 0x18): chave 1 = Health, 2 = HealthMax (CalculateHealthMax usa SetStat(2)).
 function hpDe(ps) {
   try {
