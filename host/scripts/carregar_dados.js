@@ -25,6 +25,10 @@ const HOST_ID = '76561197960271872';
 // SurvPC_C (Dumper-7): TutorialCompleted 0xC88, CurrentTutorialStage 0xD70, Steam_Id 0xF20, PlayerLocSave 0xFA8
 const OFF_COMPLETO = 0xC88, OFF_ETAPA = 0xD70, OFF_STEAMID = 0xF20, OFF_POS = 0xFA8;
 let fLoad = null;
+// 12/11: janelas de espera maiores (antes: conferia so 3 s depois e pedia de novo so quando vinha erro). A leitura do save pode demorar
+// (a 1a leitura depois de uma pausa leva ~35 s e volta com erro). Agora: se nao responder em 20 s, pede de novo; ate 8 pedidos e 120 s no total;
+// o log final so sai quando os dados chegam (completo=1), a leitura responde sem dados (personagem novo) ou o limite estoura.
+const ESPERA_RESPOSTA_MS = 20000, MAX_TENT = 8, LIMITE_TOTAL_MS = 120000;
 const vistoEm = new Map(), feitos = new Set(), fila = [];
 
 function acharFuncao(o, alvo) {
@@ -50,10 +54,23 @@ setInterval(function () {
       const k = pc.toString();
       if (feitos.has(k)) {
         const v = vistoEm.get(k);
-        if (v && v.conferir && agora - v.chamado > 3000) {
-          v.conferir = false;
-          log('depois do LoadUserInfo: ' + fstr(pc.add(OFF_STEAMID)) + ' completo=' + pc.add(OFF_COMPLETO).readU8() + ' etapa="' + fstr(pc.add(OFF_ETAPA)) +
-              '" posSalva=' + (fstr(pc.add(OFF_POS)).replace(/Rotation:.*/, '').trim() || '(vazia: personagem novo?)'));
+        if (v && v.conferir) {
+          const sidK = fstr(pc.add(OFF_STEAMID)), nT = tentativas.get(k) || 0, seg = ((agora - (v.primeiro || agora)) / 1000).toFixed(1);
+          if (pc.add(OFF_COMPLETO).readU8() === 1) {
+            v.conferir = false;
+            log('dados carregados para ' + sidK + ' em ' + seg + ' s (pedidos: ' + nT + '): etapa="' + fstr(pc.add(OFF_ETAPA)) + '" posSalva=' +
+                (fstr(pc.add(OFF_POS)).replace(/Rotation:.*/, '').trim() || '(vazia)'));
+          } else if (v.got && agora - v.got > 3000) {
+            v.conferir = false;
+            log('a leitura de ' + sidK + ' respondeu em ' + seg + ' s mas sem dados do personagem (personagem novo?)');
+          } else if (agora - (v.primeiro || agora) > LIMITE_TOTAL_MS) {
+            v.conferir = false;
+            log('DESISTO de carregar os dados de ' + sidK + ' depois de ' + seg + ' s e ' + nT + ' pedido(s)');
+          } else if (!v.got && v.chamado && agora - v.chamado > ESPERA_RESPOSTA_MS && nT < MAX_TENT && !fila.length) {
+            tentativas.set(k, nT + 1); v.chamado = agora;
+            log('sem resposta de ' + sidK + ' em ' + ((agora - v.primeiro) / 1000).toFixed(0) + ' s; pedindo de novo (pedido ' + (nT + 1) + ' de ' + MAX_TENT + ')');
+            fila.push([pc, sidK]); pendente.writeS32(1);
+          }
         }
         continue;
       }
@@ -83,9 +100,9 @@ const resposta = new NativeCallback(function (obj, f) {
   try {
     const k = obj.toString(), v = vistoEm.get(k) || {}, ms = v.chamado ? Date.now() - v.chamado : -1;
     const sid = fstr(obj.add(OFF_STEAMID));
-    if (f.equals(fGotPtr)) { log('resposta OK para ' + sid + ' em ' + ms + ' ms (tentativa ' + (tentativas.get(k) || 0) + ')'); return; }
+    if (f.equals(fGotPtr)) { v.got = Date.now(); vistoEm.set(k, v); log('resposta OK para ' + sid + ' em ' + ms + ' ms (pedido ' + (tentativas.get(k) || 0) + ')'); return; }
     const n = (tentativas.get(k) || 0);
-    if (n >= 5) { log('ERRO de leitura para ' + sid + ' depois de ' + n + ' tentativas; desisto'); return; }
+    if (n >= MAX_TENT) { log('ERRO de leitura para ' + sid + ' depois de ' + n + ' tentativas; desisto'); return; }
     tentativas.set(k, n + 1);
     log('ERRO de leitura para ' + sid + ' em ' + ms + ' ms (conexao velha com o banco); pedindo de novo (tentativa ' + (n + 1) + ')');
     fila.push([obj, sid]); pendente.writeS32(1);
@@ -109,7 +126,7 @@ const chamar = new NativeCallback(function () {
       if (classe(pc) !== 'SurvPC_C') continue;    // saiu antes
       parms.writeByteArray(new Array(64).fill(0));
       processEvent(pc, fLoad, parms);
-      const v = vistoEm.get(pc.toString()) || {}; v.chamado = Date.now(); v.conferir = true; vistoEm.set(pc.toString(), v);
+      const v = vistoEm.get(pc.toString()) || {}; v.chamado = Date.now(); if (!v.primeiro) v.primeiro = v.chamado; v.got = 0; v.conferir = true; vistoEm.set(pc.toString(), v);
       log('LoadUserInfo chamado para ' + sid + ' (carrega tutorial e posicao salva antes do spawn)');
     }
   } catch (e) { log('erro chamando LoadUserInfo: ' + e); }
