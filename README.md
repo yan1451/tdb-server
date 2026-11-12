@@ -1,195 +1,195 @@
-# Servidor próprio para The Day Before (host nativo)
+# Собственный сервер для The Day Before (нативный хост)
 
-Os servidores oficiais do jogo foram desligados. Este projeto transforma uma segunda cópia do próprio
-`TheDayBefore.exe` em servidor (modo dedicado, sem janela), usando scripts **Frida**, e redireciona o
-Firestore do jogo para um **emulador local**. O cliente conecta pelo Server Browser do jogo
-(linha **SERVIDOR-LOCAL**).
+Автор оригинального проекта: https://github.com/yan1451/tdb-server
 
-> Não contém arquivos do jogo. Você precisa ter o jogo instalado. Os scripts dependem dos endereços
-> deste executável específico (UE 5.2.1, build com emulador Steam); outra versão do exe não funciona.
+Официальные серверы игры были отключены. Этот проект превращает вторую копию самого
+`TheDayBefore.exe` в сервер (выделенный режим, без окна) с помощью скриптов **Frida** и перенаправляет
+Firestore игры на **локальный эмулятор**. Клиент подключается через внутриигровой браузер серверов
+(строка **ЛОКАЛЬНЫЙ-СЕРВЕР**).
 
-## Estrutura
+> Файлы игры в проект не входят. Игра должна быть установлена у вас. Скрипты зависят от адресов
+> именно этой версии исполняемого файла (UE 5.2.1, сборка с эмулятором Steam); другая версия exe не подойдёт.
 
-| Pasta | Conteúdo |
+## Структура
+
+| Папка | Содержимое |
 |---|---|
-| `host/servidor_host.py` | Runner único: sobe serviços, cria a lista de servidores e abre o host com os scripts |
-| `host/scripts/` | Scripts Frida do host (listen, modo dedicado, replicação, login, redirecionamentos) |
-| `host/ferramentas/` | Opcionais: `dar_dinheiro.js` (entrega itens ao jogador), sondas de leitura |
-| `host/carregar_script_no_host.py` | Carrega uma ferramenta num host já aberto |
-| `servicos/` | Emulador do Firestore (config), ponte IPv6, terminador TLS e gerador de certificados |
-| `cliente/cliente_conecta.py` | Abre o jogo do jogador com os redirecionamentos necessários |
+| `host/servidor_host.py` | Единый запускатель: поднимает службы, создаёт список серверов и запускает хост со скриптами |
+| `host/scripts/` | Скрипты Frida для хоста (прослушивание, выделенный режим, репликация, вход, перенаправления) |
+| `host/ferramentas/` | Дополнительные инструменты: `dar_dinheiro.js` (выдаёт предметы игроку), диагностические скрипты чтения |
+| `host/carregar_script_no_host.py` | Загружает инструмент в уже запущенный хост |
+| `servicos/` | Эмулятор Firestore (конфигурация), мост IPv6, обработчик TLS и генератор сертификатов |
+| `cliente/cliente_conecta.py` | Запускает игру игрока с необходимыми перенаправлениями |
 
-## O que instalar
+## Что необходимо установить
 
-No PC do host **e** em cada conta/PC de cliente:
+На ПК хоста **и** на каждом аккаунте/ПК клиента:
 
-1. **The Day Before** instalado (padrão `C:\Games\THE DAY BEFORE`; outra pasta: variável `TDB_JOGO`).
-2. **Python 3.11+** (marque "Add to PATH").
-3. **Frida**: `pip install frida frida-tools` (testado com Frida 17).
+1. Установленная **The Day Before** (путь по умолчанию: `C:\Games\THE DAY BEFORE`; для другой папки используется переменная `TDB_JOGO`).
+2. **Python 3.11+** (при установке отметьте пункт «Add to PATH»).
+3. **Frida**: `pip install frida frida-tools` (проверено с Frida 17).
 
-Só no host:
+Только на хосте:
 
-4. **Node.js LTS** e **Firebase CLI**: `npm install -g firebase-tools`
-5. **Java 11+** (o emulador do Firestore precisa).
-6. Pacote de certificados: `pip install cryptography`
+4. **Node.js LTS** и **Firebase CLI**: `npm install -g firebase-tools`
+5. **Java 11+** (необходима эмулятору Firestore).
+6. Пакет для работы с сертификатами: `pip install cryptography`
 
-Feche o **Proxifier** (ou proxies parecidos): ele quebra a conexão com o emulador.
+Закройте **Proxifier** (и похожие прокси-программы): они нарушают соединение с эмулятором.
 
-## Rodar o host
+## Запуск хоста
 
 ```bash
 python -I host\servidor_host.py
 ```
 
-Ele sobe sozinho: emulador do Firestore (127.0.0.1:8081), ponte IPv6 ([::1]:8081), terminador TLS
-(porta 443), cria os certificados locais e o servidor `SERVIDOR-LOCAL` na lista, abre o jogo sem janela,
-faz o travel para o mapa e abre o listen na UDP 7777. Espere no log
-`%TEMP%\servidor_host_headless.out` a linha `LISTEN OK` (≈ 30–70 s).
+Скрипт самостоятельно запускает: эмулятор Firestore (127.0.0.1:8081), мост IPv6 ([::1]:8081), обработчик TLS
+(порт 443), создаёт локальные сертификаты и сервер `ЛОКАЛЬНЫЙ-СЕРВЕР` в списке, запускает игру без окна,
+перемещает персонажа на карту и открывает прослушивание UDP-порта 7777. Дождитесь строки `LISTEN OK`
+в журнале `%TEMP%\servidor_host_headless.out` (примерно 30–70 секунд).
 
-- Padrão: sem janela e em **modo leve** (monitores de diagnóstico desligados; ~40–55 quadros/s com um cliente).
-- `--com-janela`: abre com janela; aperte **F8** depois do menu (continua leve).
-- `--diag`: desliga o modo leve (mais lento; só para investigar).
-- Monitor de bugs ligado por padrão (`host\scripts\monitor_bugs.js`, filtro nativo, barato): no log aparecem `ITEM SUMIU?` (item que saiu de inventário+baú e não voltou em 20 s; venda/uso também aparecem) e `TIRO EM ZUMBI LONGE` (o cliente acertou uma cópia velha de zumbi). `--sem-monitores` desliga.
-  Também sobem `monitor_ping.js` (`[ping]` de cada jogador a cada 15 s) e `monitor_posicao.js` (`[pos]`: posição no servidor; marca `TELEPORTE`, `CAINDO`, `TROCOU PAWN`).
-- **Resgate de queda** ligado por padrão (`host\scripts\resgate_queda.js`): quem cai por 6 s seguidos (ou passa de 1.500 m abaixo do zero)
-  é teleportado para o último lugar onde estava pisando, com a velocidade zerada (sem dano de queda); sem lugar seguro, vai para um ponto
-  de spawn de Woodberry. No log: `RESGATE`. `--sem-resgate` desliga. Unstuck manual: veja **Ferramentas**.
-- **Aparência de quem chega depois** (`host\scripts
-eaplicar_aparencia.js`, sempre ligado): reenvia rosto/cabelo/barba de um jogador quando o pawn dele chega a outro cliente (sem isso, quem entrou depois podia aparecer sem cabeça para os outros). No log: `reenviada a aparencia`.
-- O Firestore é exportado a cada 60 s para `servicos\firestore_emu\emu_data` (personagens salvos).
-- Uso medido: ~1,5 núcleo de CPU e **~10 GB de RAM** (o mapa inteiro fica carregado).
+- По умолчанию: без окна и в **облегчённом режиме** (диагностические мониторы отключены; около 40–55 кадров/с с одним клиентом).
+- `--com-janela`: запуск с окном; нажмите **F8** после появления меню (облегчённый режим сохранится).
+- `--diag`: отключает облегчённый режим (работает медленнее; используйте только для диагностики).
+- Монитор ошибок включён по умолчанию (`host\scripts\monitor_bugs.js`, недорогой нативный фильтр): в журнале появляются `ITEM SUMIU?` (предмет исчез из инвентаря и хранилища и не вернулся за 20 секунд; продажа и использование тоже отображаются) и `TIRO EM ZUMBI LONGE` (клиент попал в устаревшую копию зомби). Параметр `--sem-monitores` отключает мониторинг.
+  Также запускаются `monitor_ping.js` (пинг каждого игрока каждые 15 секунд, метка `[ping]`) и `monitor_posicao.js` (позиция на сервере, метка `[pos]`; отмечает `TELEPORTE`, `CAINDO`, `TROCOU PAWN`).
+- **Спасение при падении** включено по умолчанию (`host\scripts\resgate_queda.js`): если игрок падает 6 секунд подряд (или оказывается ниже нулевой отметки более чем на 1 500 м), его телепортирует в последнее место, на котором он стоял, и обнуляет скорость (урон от падения не наносится). Если безопасного места нет, игрока переносит в точку возрождения Woodberry. В журнале отображается `RESGATE`. Параметр `--sem-resgate` отключает эту функцию. Ручное освобождение из застревания описано в разделе **Инструменты**.
+- **Внешность новых игроков** (`host\scripts\reaplicar_aparencia.js`, всегда включено): повторно отправляет лицо, волосы и бороду игрока, когда его pawn появляется у другого клиента (без этого игрок, подключившийся позже, мог отображаться для остальных без головы). В журнале: `reenviada a aparencia`.
+- Firestore экспортируется каждые 60 секунд в `servicos\firestore_emu\emu_data` (сохранённые персонажи).
+- Измеренная нагрузка: около 1,5 ядра CPU и **~10 ГБ ОЗУ** (вся карта остаётся загруженной).
 
-## Host numa VPS Linux (Wine)
+## Хост на Linux VPS (Wine)
 
-Testado em Ubuntu 24.04 (Azure, 4 vCPUs, 16 GB). O jogo e o Frida de Windows rodam dentro do Wine; o Firestore e o terminador TLS
-rodam nativos no Linux.
+Проверено на Ubuntu 24.04 (Azure, 4 vCPU, 16 ГБ). Игра и Windows-версия Frida запускаются внутри Wine; Firestore и обработчик TLS
+работают непосредственно в Linux.
 
-1. Copie esta pasta para a VPS (ex.: `~/tdb/servidor`) e a pasta do jogo para `~/tdb/jogo` (o mesmo build do PC).
-2. Instale tudo (Wine, Xvfb, Java, Node + firebase-tools, swap de 8 GB, Python 3.11 + Frida de Windows dentro do Wine):
+1. Скопируйте эту папку на VPS (например, `~/tdb/servidor`), а папку игры — в `~/tdb/jogo` (используйте ту же сборку, что и на ПК).
+2. Установите всё необходимое (Wine, Xvfb, Java, Node + firebase-tools, файл подкачки swap на 8 ГБ, Python 3.11 + Windows-версию Frida внутри Wine):
    ```bash
    bash linux/instalar_vps.sh
    ```
-3. Libere no firewall da VPS (ex.: NSG da Azure) a entrada **UDP 7777** e **TCP 443**, de preferência só para o IP dos jogadores
-   (o emulador do Firestore aceita leitura e escrita de qualquer um).
-4. Suba tudo com **um comando** (serviços + host; espera o `LISTEN OK`; pode rodar de novo, o que já estiver no ar é mantido):
+3. Откройте во встроенном брандмауэре VPS (например, NSG Azure) входящие порты **UDP 7777** и **TCP 443**. Желательно разрешить доступ только с IP-адресов игроков
+   (эмулятор Firestore принимает чтение и запись от кого угодно).
+4. Запустите всё **одной командой** (службы + хост; скрипт дождётся `LISTEN OK`; его можно запускать повторно — уже работающие службы останутся запущенными):
    ```bash
    bash linux/subir_tudo.sh
    ```
-   - O IP público é conferido a cada subida e guardado em `linux/vps.conf` (junto com `TDB_NOME_SERVIDOR`). Se a Azure trocar o IP
-     depois de desalocar a VM, aparece um AVISO: ponha o IP novo no `host.txt` dos clientes.
-   - Para **parar e salvar** (host, export final do Firestore, emulador e TLS) antes de desligar a VM:
+   - Публичный IP проверяется при каждом запуске и сохраняется в `linux/vps.conf` (вместе с `TDB_NOME_SERVIDOR`). Если Azure изменит IP
+     после освобождения VM, появится ПРЕДУПРЕЖДЕНИЕ: укажите новый IP в файле `host.txt` у клиентов.
+   - Чтобы **остановить сервер и сохранить данные** (хост, финальный экспорт Firestore, эмулятор и TLS) перед выключением VM:
      ```bash
      bash linux/derrubar_tudo.sh
      ```
-     Depois use **Parar** no portal da Azure (desaloca e para a cobrança de CPU; o `shutdown` de dentro da VM não desaloca).
-   - Opcional: **subir sozinho ao ligar a VM** e salvar ao desligar (serviço do systemd `tdb-servidor`):
+     После этого нажмите **Остановить** в портале Azure (это освобождает ресурсы VM и прекращает оплату CPU; команда `shutdown` внутри VM этого не делает).
+   - Необязательно: **автоматический запуск при включении VM** и сохранение данных при выключении (служба systemd `tdb-servidor`):
      ```bash
-     bash linux/instalar_inicio_automatico.sh          # --remover desfaz
+     bash linux/instalar_inicio_automatico.sh          # параметр --remover отменяет установку
      ```
-   - Peças avulsas, se precisar: `bash linux/iniciar_servicos.sh &` e `TDB_IP_PUBLICO=<ip> bash linux/iniciar_host.sh`.
-5. No PC do jogador: `python cliente\cliente_conecta.py --host <ip-da-vps>` (ou ponha o IP num arquivo `cliente\host.txt` e rode sem opção) (o IP precisa ter até 14 caracteres; o cliente abre
-   uma ponte local na 443 que leva o Firestore até a VPS — feche qualquer terminador TLS local antes).
-6. **Obrigatório nos dois lados (host e cada cliente):** crie o arquivo vazio
-   `Engine\Binaries\ThirdParty\Steamworks\Steamv153\Win64\steam_settings\disable_lan_only.txt` na pasta do jogo. Sem ele o emulador de
-   Steam (steam_api64.dll) bloqueia em silêncio todo tráfego do jogo para IPs fora da rede local (o join dá "erro de conexão").
-7. O Server Browser usa o **nome do documento** da lista (`servers/<ip>:<porta>`) como endereço; o runner cria o documento com
-   `TDB_IP_PUBLICO` (nome exibido em `TDB_NOME_SERVIDOR`).
+   - Отдельные службы, если понадобятся: `bash linux/iniciar_servicos.sh &` и `TDB_IP_PUBLICO=<ip> bash linux/iniciar_host.sh`.
+5. На ПК игрока: `python cliente\cliente_conecta.py --host <ip-vps>` (или запишите IP в файл `cliente\host.txt` и запустите без параметра). IP должен содержать не более 14 символов; клиент открывает локальный мост на порту 443, который направляет Firestore на VPS — перед запуском закройте любой локальный обработчик TLS.
+6. **Обязательно на обеих сторонах (хосте и у каждого клиента):** создайте пустой файл
+   `Engine\Binaries\ThirdParty\Steamworks\Steamv153\Win64\steam_settings\disable_lan_only.txt` в папке игры. Без него эмулятор
+   Steam (`steam_api64.dll`) молча блокирует весь игровой трафик на IP-адреса за пределами локальной сети (при подключении появляется «ошибка соединения»).
+7. Браузер серверов использует в качестве адреса **имя документа** из списка (`servers/<ip>:<порт>`); запускающий скрипт создаёт документ с `TDB_IP_PUBLICO` (отображаемое имя задаётся через `TDB_NOME_SERVIDOR`).
 
-## Rodar o cliente
+## Запуск клиента
 
-Use **outra conta do Windows** (ou outro PC): o jogo só abre uma instância por usuário, porque o banco
-local do Firestore em `%LOCALAPPDATA%` fica travado pelo primeiro processo.
+Используйте **другую учётную запись Windows** (или другой ПК): игра разрешает запуск только одного экземпляра на пользователя, поскольку локальная база Firestore в `%LOCALAPPDATA%` блокируется первым процессом.
 
 ```bash
 python cliente\cliente_conecta.py
 ```
 
-No jogo: login → Server Browser → **Atualizar** → **SERVIDOR-LOCAL**.
-Cada jogador precisa de um SteamId próprio (o personagem fica em `players/<SteamId>`). O cliente cuida disso sozinho: na 1ª vez
-gera um ID e guarda em `%LOCALAPPDATA%	db_cliente\steamid.txt` (por conta do Windows; continua o mesmo ao trocar a pasta do cliente;
-apagar o arquivo = personagem novo). Para escolher o ID: `TDB_STEAMID`/`TDB_NOME` ou um arquivo `cliente\steamid.txt` (1ª linha o ID,
-2ª o nome). Editar `force_steamid.txt` à mão não adianta (o cliente o regrava a cada abertura). O `disable_lan_only.txt` também é
-criado sozinho. `--diag` liga os scripts de diagnóstico (mais lento).
-Vida, fome e sede ficam **sempre na tela** (`clientearras_sempre_visiveis.js`; o HUD original só mostra quando um valor sobe ou fica crítico). `--sem-barras-fixas` volta ao comportamento do jogo.
+В игре: вход → Server Browser → **Обновить** → **ЛОКАЛЬНЫЙ-СЕРВЕР**.
 
-## Launcher (Online / Offline / atualização automática): `Abrir TDB Launcher.bat`
+У каждого игрока должен быть собственный SteamId (персонаж хранится в `players/<SteamId>`). Клиент делает всё автоматически: при первом запуске
+создаёт ID и сохраняет его в `%LOCALAPPDATA%\tdb_cliente\steamid.txt` (для каждой учётной записи Windows; ID сохраняется даже при смене папки клиента;
+удаление файла = создание нового персонажа). Чтобы выбрать ID: используйте `TDB_STEAMID`/`TDB_NOME` или файл `cliente\steamid.txt` (первая строка — ID,
+вторая — имя). Редактировать `force_steamid.txt` вручную бесполезно (клиент перезаписывает его при каждом запуске). Файл `disable_lan_only.txt` также
+создаётся автоматически. Параметр `--diag` включает диагностические скрипты (работает медленнее).
+Здоровье, голод и жажда **всегда отображаются на экране** (`cliente\barras_sempre_visiveis.js`; стандартный HUD показывает их только при изменении значения или критическом уровне). Параметр `--sem-barras-fixas` возвращает стандартное поведение игры.
 
-Janela simples (Python + tkinter, nada extra para instalar além do Python com `frida`):
-- **Jogar Online:** abre o jogo no servidor cujo IP está em `cliente\host.txt`, com o SteamId próprio da pessoa (gerado na 1ª vez).
-- **Jogar Offline:** sobe o servidor do próprio PC (`host\servidor_host.py --appdata-separado`, na mesma conta do Windows), espera o
-  `LISTEN OK` e abre o jogo nele com o ID antigo (`76561197960287930`), onde estão os saves locais. Ao fechar o jogo, fecha o host
-  (com o export final do Firestore) e desliga o emulador e o terminador TLS (porta 443), para o modo Online funcionar depois.
-- Mostra se o servidor online está no ar, a versão instalada e a saída do cliente/host; opção "vida, fome e sede sempre visíveis".
-- **Pasta do jogo:** linha "Pasta do jogo" com o botão **Escolher...** (aceita a pasta do jogo ou qualquer subpasta; confere
-  `Survival\Binaries\Win64\TheDayBefore.exe`). Fica em `launcher\config.json` e vale para o cliente e para o host local. Padrão:
-  `C:\Games\THE DAY BEFORE`. Se não achar o jogo, o launcher pede a pasta antes de jogar.
-- **Atualização:** ao abrir e antes de jogar, compara os arquivos com a release mais recente do GitHub
-  (`/releases/latest/download/manifesto.json`) e troca só os diferentes, conferindo o SHA-256 de cada arquivo e do zip. Nunca mexe em
-  `cliente\host.txt`, `cliente\steamid.txt`, `launcher\config.json` nem nos saves (`servicos\`). Se o próprio launcher mudar, ele reabre.
-- **Erros:** tudo que aparece na janela (e qualquer erro, com o traceback) fica em `launcher\launcher.log` — botão **Log do launcher**.
-  Ao abrir, o launcher confere se o Frida está instalado e avisa (`pip install frida frida-tools`). **Parar** fecha o jogo na hora.
-- Cliente sem launcher: `python cliente\cliente_conecta.py` (online) ou `python cliente\cliente_conecta.py --local` (servidor do PC).
+## Лаунчер (онлайн / офлайн / автоматическое обновление): `Abrir TDB Launcher.bat`
 
-**Publicar uma versão nova (dono do servidor):**
+Простое окно (Python + tkinter, ничего дополнительно устанавливать не нужно, кроме Python и `frida`):
+
+- **Играть онлайн:** запускает игру на сервере, IP которого указан в `cliente\host.txt`, с собственным SteamId игрока (создаётся при первом запуске).
+- **Играть офлайн:** запускает сервер на этом же ПК (`host\servidor_host.py --appdata-separado`, в той же учётной записи Windows), ждёт
+  `LISTEN OK` и запускает на нём игру со старым ID (`76561197960287930`), где находятся локальные сохранения. После закрытия игры лаунчер закрывает хост
+  (с финальным экспортом Firestore), останавливает эмулятор и обработчик TLS (порт 443), чтобы после этого снова можно было играть онлайн.
+- Показывает, доступен ли онлайн-сервер, установленную версию и вывод клиента/хоста; есть настройка «здоровье, голод и жажда всегда отображаются».
+- **Папка игры:** строка «Папка игры» с кнопкой **Выбрать...** (подойдёт папка игры или любая вложенная папка; проверяется наличие
+  `Survival\Binaries\Win64\TheDayBefore.exe`). Путь сохраняется в `launcher\config.json` и используется клиентом и локальным хостом. По умолчанию:
+  `C:\Games\THE DAY BEFORE`. Если игра не найдена, лаунчер попросит указать папку перед запуском.
+- **Обновление:** при открытии и перед запуском игры лаунчер сравнивает файлы с последним релизом GitHub
+  (`/releases/latest/download/manifesto.json`) и заменяет только отличающиеся, проверяя SHA-256 каждого файла и ZIP-архива. Никогда не изменяет
+  `cliente\host.txt`, `cliente\steamid.txt`, `launcher\config.json` и сохранения (`servicos\`). Если обновился сам лаунчер, он перезапускается.
+- **Ошибки:** всё, что отображается в окне (а также любые ошибки с traceback), записывается в `launcher\launcher.log` — кнопка **Журнал лаунчера**.
+  При запуске лаунчер проверяет, установлен ли Frida, и предупреждает, если его нет (`pip install frida frida-tools`). Кнопка **Остановить** немедленно закрывает игру.
+- Клиент без лаунчера: `python cliente\cliente_conecta.py` (онлайн) или `python cliente\cliente_conecta.py --local` (сервер на этом ПК).
+
+**Публикация новой версии (владелец сервера):**
+
+```bash
+python -I launcher\publicar_versao.py 2026.11.08-2 --notas "что изменилось"
 ```
-python -I launcher\publicar_versao.py 2026.11.08-2 --notas "o que mudou"
-```
-Gera `dist\<versao>\manifesto.json` e `atualizacao.zip` (cliente, launcher e scripts do host; sem IP, SteamId nem saves). Suba os 2 arquivos
-numa release nova em https://github.com/yan1451/tdb-server/releases/new marcada como *latest* (ou use `--publicar` com o GitHub CLI `gh`).
 
-## Painel de gerenciamento (Azure + VPS): `painel/`
+Создаёт `dist\<версия>\manifesto.json` и `atualizacao.zip` (клиент, лаунчер и скрипты хоста; без IP, SteamId и сохранений). Загрузите оба файла
+в новый релиз по адресу https://github.com/yan1451/tdb-server/releases/new и отметьте его как *latest* (последний релиз). Либо используйте параметр `--publicar` вместе с GitHub CLI `gh`.
 
-Painel no navegador, que roda **no seu PC**. Ele usa o Azure CLI já logado (`az login`) e a chave SSH da VM.
+## Панель управления (Azure + VPS): `painel/`
+
+Панель в браузере, которая работает **на вашем ПК**. Она использует уже авторизованный Azure CLI (`az login`) и SSH-ключ виртуальной машины.
 
 ```bash
 python -I painel\painel.py
 ```
 
-Ou dê dois cliques em `painel\abrir_painel.bat`. O painel abre `http://127.0.0.1:8765`.
+Или дважды щёлкните `painel\abrir_painel.bat`. Панель откроется по адресу `http://127.0.0.1:8765`.
 
-- **Controle:**
-  - ligar e desalocar a VM (antes de desalocar, derruba o servidor e salva os personagens);
-  - subir o servidor (versão normal ou otimizada; opcional: enviar antes os scripts do PC) e derrubar;
-  - saída das tarefas ao vivo.
-- **Jogadores:** quem está conectado, com ping, posição e último evento (do monitor de ping e do de posição).
-- **Monitores:** liga e desliga ao vivo cada monitor (ping, posição, resgate de queda, bugs, loot e tiro). O painel sobe o host com `--sem-monitores --sem-resgate` e carrega cada monitor como processo separado na VPS; a escolha fica salva.
-- **Logs:** runner, console, serviços, Firestore, exports e o log de cada monitor, com filtro, "sem ruído" e atualização automática.
-- **Configuração:** copie `painel\config.exemplo.json` para `painel\config.json` e preencha grupo, VM, IP, usuário e chave. Esse arquivo não vai para o GitHub.
-- **Segurança:** o painel escuta só em `127.0.0.1`, e as ações exigem um token gerado a cada execução, embutido na página.
+- **Управление:**
+  - включение и освобождение VM (перед освобождением сервер останавливается, а персонажи сохраняются);
+  - запуск сервера (обычная или оптимизированная версия; при желании — предварительная отправка скриптов с ПК) и остановка;
+  - вывод выполняемых задач в реальном времени.
+- **Игроки:** список подключённых игроков, их пинг, положение и последнее событие (из мониторов пинга и положения).
+- **Мониторы:** включение и выключение каждого монитора в реальном времени (пинг, положение, спасение при падении, ошибки, добыча и выстрелы). Панель запускает хост с параметрами `--sem-monitores --sem-resgate` и загружает каждый монитор отдельным процессом на VPS; выбранные настройки сохраняются.
+- **Журналы:** запускатель, консоль, службы, Firestore, экспорты и журнал каждого монитора; доступны фильтр, режим «без лишнего шума» и автоматическое обновление.
+- **Настройка:** скопируйте `painel\config.exemplo.json` в `painel\config.json` и укажите группу, VM, IP, пользователя и ключ. Этот файл не отправляется на GitHub.
+- **Безопасность:** панель принимает подключения только на `127.0.0.1`, а для выполнения действий требуется токен, создаваемый при каждом запуске и встроенный в страницу.
 
-## Versão otimizada (experimental): `host_otimizado/`
+## Оптимизированная версия (экспериментальная): `host_otimizado/`
 
-Cópia do `host/` com a replicação num só script, `replicacao_otimizada.js`, em duas frentes:
-- **laço em C** (CModule do Frida);
-- **ritmo de cada ator** pelo `NetUpdateFrequency`.
+Копия `host/`, в которой репликация объединена в один скрипт `replicacao_otimizada.js` и оптимизирована двумя способами:
+- **цикл на C** (CModule во Frida);
+- **частота обновления каждого актора** через `NetUpdateFrequency`.
 
-O log mostra a cada 60 s o tick e o tempo gasto por quadro (`[otim]`). Detalhes, teste fora do jogo e como voltar estão em
-[host_otimizado/LEIA.md](host_otimizado/LEIA.md). Para usar: `python -I host_otimizado\servidor_host.py`, ou na VPS
+В журнале каждые 60 секунд отображаются частота тиков и время обработки кадра (`[otim]`). Подробности, тестирование вне игры и способ возврата к обычной версии описаны в
+[host_otimizado/LEIA.md](host_otimizado/LEIA.md). Для запуска используйте `python -I host_otimizado\servidor_host.py`, а на VPS —
 `TDB_HOST_PASTA=host_otimizado bash linux/subir_tudo.sh`.
 
-## Ferramentas
+## Инструменты
 
-Dar 50.000 de dinheiro ao(s) jogador(es) conectado(s) (o valor fica no topo do script):
-
-```bash
-python -I host\carregar_script_no_host.py <PID_do_host> host\ferramentas\dar_dinheiro.js
-```
-
-Na VPS: `bash linux/carregar_ferramenta.sh host/ferramentas/dar_dinheiro.js`.
-
-**Unstuck manual** (jogador preso ou caindo): teleporta para o último lugar seguro, ou para Woodberry.
+Выдать 50 000 игровой валюты подключённому игроку или игрокам (сумма указана в верхней части скрипта):
 
 ```bash
-bash linux/unstuck.sh          # todos
-bash linux/unstuck.sh 8617     # só quem tem "8617" no nome (nomes nas linhas [ping] do log)
+python -I host\carregar_script_no_host.py <PID_хоста> host\ferramentas\dar_dinheiro.js
 ```
 
-No host Windows, o mesmo pedido é uma linha no arquivo `%TEMP%\tdb_host_cmd\unstuck.txt` com um número novo e o nome:
+На VPS: `bash linux/carregar_ferramenta.sh host/ferramentas/dar_dinheiro.js`.
+
+**Ручное освобождение из застревания** (игрок застрял или падает): телепортирует его в последнее безопасное место или в Woodberry.
+
+```bash
+bash linux/unstuck.sh          # все игроки
+bash linux/unstuck.sh 8617     # только игрок, в имени которого есть «8617» (имена указаны в строках [ping] журнала)
+```
+
+На хосте Windows аналогичный запрос задаётся одной строкой в файле `%TEMP%\tdb_host_cmd\unstuck.txt` с новым номером и именем:
 `Set-Content "$env:TEMP\tdb_host_cmd\unstuck.txt" "$(Get-Date -UFormat %s) todos"`.
 
-## Limitações conhecidas
+## Известные ограничения
 
-- A replicação é recriada em JavaScript (o exe é build de cliente, sem `ServerReplicateActors`):
-  ~40–55 quadros/s com um cliente no PC; ~37–40 com dois jogadores na VPS (4 vCPUs).
-- Memória: o host passa de 13 GB com dois jogadores; numa VM de 16 GB ele usa swap (recomendado 32 GB).
-- Os nomes dos jogadores aparecem como `DESKTOP-...-xxxx`.
+- Репликация реализована заново на JavaScript (exe собран как клиентская версия, без `ServerReplicateActors`):
+  около 40–55 кадров/с с одним клиентом на ПК; около 37–40 кадров/с с двумя игроками на VPS (4 vCPU).
+- Память: хост использует более 13 ГБ при двух игроках; на VM с 16 ГБ начинает использоваться swap (рекомендуется 32 ГБ).
+- Имена игроков отображаются в формате `DESKTOP-...-xxxx`.

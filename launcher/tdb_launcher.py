@@ -35,7 +35,7 @@ HOST = RAIZ / "host" / "servidor_host.py"
 # 10/11: o Offline usa o host_otimizado (replicacao em C, sem o limite de 150 atores sempre relevantes) com os mesmos argumentos
 # da VPS. O host normal (replicacao em JS a cada quadro + monitores) rodava a 9-15 quadros/s com 1 jogador: atraso e itens demorando.
 HOST_OTIM = RAIZ / "host_otimizado" / "servidor_host.py"
-ARGS_HOST_OFFLINE = ["--appdata-separado", "--sem-monitores"]   # 10/11: resgate de queda (resgate_queda.js) ligado dentro do host
+ARGS_HOST_OFFLINE = ["--appdata-separado", "--sem-monitores", "--sem-resgate"]
 HOST_TXT = RAIZ / "cliente" / "host.txt"
 LOG_HOST = Path(os.environ.get("TEMP", ".")) / "servidor_host_headless.out"
 SEM_JANELA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -192,63 +192,163 @@ class Launcher:
     def _montar(self):
         r = self.r
         r.title("TDB Launcher")
-        r.geometry("760x520")
-        r.minsize(620, 420)
-        fundo, texto, sec = "#15181d", "#e6e6e6", "#9aa3ad"
-        r.configure(bg=fundo)
-        self.w_titulo = tk.Label(r, text=self.t("titulo"), bg=fundo, fg=texto, font=("Segoe UI", 15, "bold"))
-        self.w_titulo.pack(anchor="w", padx=16, pady=(14, 2))
-        info = tk.Frame(r, bg=fundo); info.pack(fill="x", padx=16)
-        self.lbl_servidor = tk.Label(info, text=self.t("srv_verificando"), bg=fundo, fg=sec, font=("Segoe UI", 10))
-        self.lbl_servidor.grid(row=0, column=0, sticky="w")
-        self.lbl_versao = tk.Label(info, text=self.t("versao", v=atualizador.versao_local()), bg=fundo, fg=sec, font=("Segoe UI", 10))
-        self.lbl_versao.grid(row=1, column=0, sticky="w")
-        self.lbl_estado = tk.Label(info, text=self.t("estado_pronto"), bg=fundo, fg=texto, font=("Segoe UI", 10, "bold"))
-        self.lbl_estado.grid(row=2, column=0, sticky="w", pady=(4, 0))
+        r.geometry("980x700")
+        r.minsize(820, 620)
 
-        info.columnconfigure(0, weight=1)
-        self.lbl_idioma = tk.Label(info, text=self.t("idioma"), bg=fundo, fg=sec, font=("Segoe UI", 10))
-        self.lbl_idioma.grid(row=0, column=1, sticky="e", padx=(0, 6))
+        # ÐÐ°Ð»Ð¸ÑÑÐ°: ÑÑÐ¼Ð½ÑÐ¹ Ð¸Ð³ÑÐ¾Ð²Ð¾Ð¹ Ð¸Ð½ÑÐµÑÑÐµÐ¹Ñ Ñ ÑÐ¾Ð»Ð¾Ð´Ð½ÑÐ¼Ð¸ Ð°ÐºÑÐµÐ½ÑÐ°Ð¼Ð¸
+        bg = "#090D14"
+        panel = "#111925"
+        panel2 = "#172333"
+        border = "#26364A"
+        white = "#F2F6FC"
+        muted = "#91A2B8"
+        accent = "#B7F36B"
+        blue = "#67B7FF"
+        green = "#A9E86A"
+        r.configure(bg=bg)
+
+        def card(parent, color=panel, padx=18, pady=16):
+            frame = tk.Frame(parent, bg=color, highlightthickness=1,
+                             highlightbackground=border, bd=0)
+            frame.configure(padx=padx, pady=pady)
+            return frame
+
+        def label(parent, text, size=10, color=muted, bold=False, **kwargs):
+            return tk.Label(parent, text=text, bg=parent.cget("bg"), fg=color,
+                            font=("Segoe UI", size, "bold" if bold else "normal"),
+                            **kwargs)
+
+        # ÐÐµÑÑÐ½ÑÑ Ð¿Ð°Ð½ÐµÐ»Ñ
+        top = tk.Frame(r, bg=bg)
+        top.pack(fill="x", padx=30, pady=(24, 18))
+        brand = tk.Frame(top, bg=bg)
+        brand.pack(side="left", fill="x", expand=True)
+        mark = tk.Label(brand, text="TDB", bg=accent, fg="#10170A",
+                        font=("Segoe UI", 13, "bold"), padx=11, pady=7)
+        mark.pack(side="left", padx=(0, 13))
+        heading = tk.Frame(brand, bg=bg)
+        heading.pack(side="left", anchor="w")
+        self.w_titulo = tk.Label(heading, text=self.t("titulo"), bg=bg, fg=white,
+                                 font=("Segoe UI", 17, "bold"), anchor="w")
+        self.w_titulo.pack(anchor="w")
+        label(heading, "COMMUNITY EDITION  â¢  THE DAY BEFORE", 8, muted, True).pack(anchor="w", pady=(3, 0))
+
+        langbox = tk.Frame(top, bg=panel, highlightthickness=1, highlightbackground=border)
+        langbox.pack(side="right", padx=(12, 0))
+        self.lbl_idioma = tk.Label(langbox, text=self.t("idioma"), bg=panel, fg=muted,
+                                   font=("Segoe UI", 9))
+        self.lbl_idioma.pack(side="left", padx=(12, 5), pady=8)
         self.v_idioma = tk.StringVar(value=idiomas.NOMES[self.idioma])
-        menu = tk.OptionMenu(info, self.v_idioma, *idiomas.NOMES.values(), command=self._trocar_idioma)
-        menu.configure(bg="#2a2f37", fg=texto, activebackground="#363c46", activeforeground=texto, relief="flat", highlightthickness=0,
-                       bd=0, font=("Segoe UI", 10), cursor="hand2")
-        menu["menu"].configure(bg="#2a2f37", fg=texto, activebackground="#363c46", activeforeground=texto, font=("Segoe UI", 10))
-        menu.grid(row=0, column=2, sticky="e")
+        menu = tk.OptionMenu(langbox, self.v_idioma, *idiomas.NOMES.values(), command=self._trocar_idioma)
+        menu.configure(bg=panel2, fg=white, activebackground="#26384D", activeforeground=white,
+                       relief="flat", highlightthickness=0, bd=0, font=("Segoe UI", 9, "bold"),
+                       cursor="hand2", padx=7, pady=4)
+        menu["menu"].configure(bg=panel2, fg=white, activebackground="#31465E",
+                               activeforeground=white, relief="flat", font=("Segoe UI", 9))
+        menu.pack(side="left", padx=(0, 8), pady=6)
 
-        bot = tk.Frame(r, bg=fundo); bot.pack(fill="x", padx=16, pady=10)
-        estilo = dict(font=("Segoe UI", 11, "bold"), relief="flat", padx=14, pady=8, cursor="hand2", bd=0)
-        self.b_online = tk.Button(bot, text=self.t("b_online"), bg="#2f7d4f", fg="white", activebackground="#3a9a61", command=self.jogar_online, **estilo)
-        self.b_online.pack(side="left")
-        self.b_offline = tk.Button(bot, text=self.t("b_offline"), bg="#3b5b8a", fg="white", activebackground="#4a70a8", command=self.jogar_offline, **estilo)
-        self.b_offline.pack(side="left", padx=8)
-        estilo2 = dict(font=("Segoe UI", 10), relief="flat", padx=10, pady=8, cursor="hand2", bd=0, bg="#2a2f37", fg=texto, activebackground="#363c46")
-        self.b_parar = tk.Button(bot, text=self.t("b_parar"), command=self.parar, state="disabled", **estilo2)
-        self.b_parar.pack(side="left")
-        self.b_atualizar = tk.Button(bot, text=self.t("b_atualizar"), command=self.atualizar_manual, **estilo2)
-        self.b_atualizar.pack(side="left", padx=8)
-        self.b_log = tk.Button(bot, text=self.t("b_log"), command=self.abrir_log_launcher, **estilo2)
-        self.b_log.pack(side="left")
 
-        jog = tk.Frame(r, bg=fundo); jog.pack(fill="x", padx=16, pady=(0, 6))
-        self.w_pasta = tk.Label(jog, text=self.t("w_pasta"), bg=fundo, fg=sec, font=("Segoe UI", 10))
-        self.w_pasta.pack(side="left")
-        self.lbl_pasta = tk.Label(jog, text="", bg=fundo, fg=texto, font=("Segoe UI", 10), anchor="w")
-        self.lbl_pasta.pack(side="left", padx=(6, 8), fill="x", expand=True)
-        self.b_escolher = tk.Button(jog, text=self.t("b_escolher"), command=self.escolher_pasta, **estilo2)
-        self.b_escolher.pack(side="right")
-        self._mostrar_pasta()
 
-        opc = tk.Frame(r, bg=fundo); opc.pack(fill="x", padx=16)
+        # Ð¡ÑÐ°ÑÑÑÐ½ÑÐµ ÐºÐ°ÑÑÐ¾ÑÐºÐ¸
+        statuses = tk.Frame(r, bg=bg)
+        statuses.pack(fill="x", padx=30, pady=(0, 16))
+        statuses.columnconfigure(0, weight=1)
+        statuses.columnconfigure(1, weight=1)
+        server_card = card(statuses, panel, 15, 12)
+        server_card.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+        version_card = card(statuses, panel, 15, 12)
+        version_card.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+        label(server_card, "â  SERVER STATUS", 8, green, True).pack(anchor="w")
+        self.lbl_servidor = tk.Label(server_card, text=self.t("srv_verificando"), bg=panel,
+                                     fg=white, font=("Segoe UI", 10, "bold"), anchor="w")
+        self.lbl_servidor.pack(anchor="w", pady=(7, 0))
+        label(version_card, "â»  LAUNCHER VERSION", 8, blue, True).pack(anchor="w")
+        self.lbl_versao = tk.Label(version_card,
+                                   text=self.t("versao", v=atualizador.versao_local()),
+                                   bg=panel, fg=white, font=("Segoe UI", 10, "bold"), anchor="w")
+        self.lbl_versao.pack(anchor="w", pady=(7, 0))
+
+        # Ð¦ÐµÐ½ÑÑÐ°Ð»ÑÐ½Ð°Ñ Ð¾Ð±Ð»Ð°ÑÑÑ: Ð·Ð°Ð¿ÑÑÐº Ð¸ Ð½Ð°ÑÑÑÐ¾Ð¹ÐºÐ¸
+        content = tk.Frame(r, bg=bg)
+        content.pack(fill="x", padx=30, pady=(0, 14))
+        play = card(content, panel, 18, 15)
+        play.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        settings = card(content, panel, 16, 15)
+        settings.pack(side="left", fill="both", expand=True, padx=(8, 0))
+        label(play, "CHOOSE YOUR EXPERIENCE", 8, muted, True).pack(anchor="w", pady=(0, 12))
+
+        buttons = tk.Frame(play, bg=panel)
+        buttons.pack(fill="x")
+        def game_button(parent, text, color, hover, command):
+            b = tk.Button(parent, text=text, bg=color, fg="#101820",
+                          activebackground=hover, activeforeground="#101820",
+                          command=command, relief="flat", bd=0, cursor="hand2",
+                          font=("Segoe UI", 11, "bold"), padx=14, pady=13)
+            return b
+        self.b_online = game_button(buttons, self.t("b_online"), accent, "#C9FF8B", self.jogar_online)
+        self.b_online.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.b_offline = game_button(buttons, self.t("b_offline"), "#6DBBFF", "#91CEFF", self.jogar_offline)
+        self.b_offline.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        self.lbl_estado = tk.Label(play, text=self.t("estado_pronto"), bg=panel, fg=green,
+                                   font=("Segoe UI", 9, "bold"), anchor="w")
+        self.lbl_estado.pack(anchor="w", pady=(13, 0))
+
+        label(settings, "GAME SETTINGS", 8, muted, True).pack(anchor="w", pady=(0, 10))
+        self.w_pasta = tk.Label(settings, text=self.t("w_pasta"), bg=panel, fg=white,
+                                font=("Segoe UI", 9, "bold"), anchor="w")
+        self.w_pasta.pack(anchor="w")
+        pathrow = tk.Frame(settings, bg=panel)
+        pathrow.pack(fill="x", pady=(5, 10))
+        self.lbl_pasta = tk.Label(pathrow, text="", bg=panel2, fg=white,
+                                  font=("Segoe UI", 8), anchor="w", justify="left",
+                                  wraplength=260, padx=9, pady=8)
+        self.lbl_pasta.pack(side="left", fill="x", expand=True)
+        self.b_escolher = tk.Button(pathrow, text=self.t("b_escolher"), command=self.escolher_pasta,
+                                    bg="#26384D", fg=white, activebackground="#354B63",
+                                    activeforeground=white, relief="flat", bd=0,
+                                    font=("Segoe UI", 8, "bold"), padx=10, pady=8, cursor="hand2")
+        self.b_escolher.pack(side="right", padx=(7, 0))
         self.v_barras = tk.BooleanVar(value=self.cfg.get("barras_fixas", True))
-        self.chk_barras = tk.Checkbutton(opc, text=self.t("chk_barras"), variable=self.v_barras, bg=fundo, fg=sec, selectcolor="#2a2f37",
-                                         activebackground=fundo, activeforeground=texto, command=self._salvar_opcoes)
-        self.chk_barras.pack(side="left")
+        self.chk_barras = tk.Checkbutton(settings, text=self.t("chk_barras"),
+                                         variable=self.v_barras, bg=panel, fg=muted,
+                                         selectcolor=panel2, activebackground=panel,
+                                         activeforeground=white, command=self._salvar_opcoes,
+                                         font=("Segoe UI", 9), anchor="w")
+        self.chk_barras.pack(anchor="w")
 
-        self.txt = scrolledtext.ScrolledText(r, bg="#0e1013", fg="#cfd6dd", insertbackground="white", font=("Consolas", 9), relief="flat", height=14)
-        self.txt.pack(fill="both", expand=True, padx=16, pady=(8, 14))
+        # ÐÐ¸Ð¶Ð½ÑÑ Ð¿Ð°Ð½ÐµÐ»Ñ Ð¸Ð½ÑÑÑÑÐ¼ÐµÐ½ÑÐ¾Ð²
+        tools = tk.Frame(r, bg=bg)
+        tools.pack(fill="x", padx=30, pady=(0, 10))
+        toolstyle = dict(bg="#1A2736", fg="#C7D3E1", activebackground="#2A3C51",
+                         activeforeground=white, relief="flat", bd=0,
+                         font=("Segoe UI", 9, "bold"), padx=12, pady=8, cursor="hand2")
+        self.b_parar = tk.Button(tools, text=self.t("b_parar"), command=self.parar,
+                                 state="disabled", **toolstyle)
+        self.b_parar.pack(side="left")
+        self.b_atualizar = tk.Button(tools, text=self.t("b_atualizar"),
+                                     command=self.atualizar_manual, **toolstyle)
+        self.b_atualizar.pack(side="left", padx=(7, 0))
+        self.b_log = tk.Button(tools, text=self.t("b_log"), command=self.abrir_log_launcher, **toolstyle)
+        self.b_log.pack(side="left", padx=(7, 0))
+        label(tools, "TDB COMMUNITY LAUNCHER", 8, "#52657B", True).pack(side="right", pady=10)
+
+        # ÐÐ¾Ð½ÑÐ¾Ð»Ñ Ð»Ð¾Ð³Ð¾Ð²
+        logs = card(r, "#0D141E", 12, 10)
+        logs.pack(fill="both", expand=True, padx=30, pady=(0, 22))
+        loghead = tk.Frame(logs, bg="#0D141E")
+        loghead.pack(fill="x", pady=(0, 7))
+        tk.Label(loghead, text="SYSTEM CONSOLE", bg="#0D141E", fg=muted,
+                 font=("Segoe UI", 8, "bold")).pack(side="left")
+        tk.Label(loghead, text="â LIVE", bg="#0D141E", fg=green,
+                 font=("Segoe UI", 8, "bold")).pack(side="right")
+        self.txt = scrolledtext.ScrolledText(logs, bg="#0A1018", fg="#AFC2D8",
+                                             insertbackground=white, font=("Cascadia Mono", 8),
+                                             relief="flat", bd=0, height=7,
+                                             padx=10, pady=8, wrap="word")
+        self.txt.pack(fill="both", expand=True)
         self.txt.configure(state="disabled")
         r.protocol("WM_DELETE_WINDOW", self.fechar)
+        self._mostrar_pasta()
 
     def _diagnostico(self):
         py = python_console()
