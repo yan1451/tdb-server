@@ -3,7 +3,10 @@
 // SurvivalPlayer.AllowVoice (+0x1681) for verdadeiro (no cliente vem 0), e NENHUM Blueprint chama VoipManagerComponent.InitVoice(Controller), que
 // abre o microfone (modulo "Voice": CreateVoiceCapture/Encoder/Decoder). Aqui: ao entrar no mapa (SurvPC local com pawn e VoipManager), chama
 // InitVoice(controle local) pela thread do jogo (gancho nativo em ProcessEvent no ReceiveDrawHUD) e repete se devolver falso (a 1a chamada falhou no
-// teste e a 2a passou); mantem AllowVoice = 1. Se o pawn mudar (morte, troca de mapa), inicia de novo. --sem-voz no launcher desliga.
+// teste e a 2a passou); mantem AllowVoice = 1.
+// LIGA/DESLIGA: tecla F9 (so com a janela do jogo em foco). Desligado = nao envia a sua voz (AllowVoice = 0) e silencia o que voce ouve
+// (gancho nativo zera o tamanho dos dados de cada SurvivalPlayer.ReceiveVoice que chega, antes de tocar; o VoiceVolumeMultiplier
+// do pawn NAO controla o que se ouve: testado); ligado = volta ao normal. O estado aparece na linha FPS da HUD (VOZ ON / VOZ OFF). Comeca ligado. Se o pawn mudar (morte, troca de mapa), inicia de novo. --sem-voz no launcher desliga.
 (function () {
 'use strict';
 const B = Process.getModuleByName('TheDayBefore.exe').base;
@@ -21,12 +24,12 @@ const g = B.add(0x7ccda10); let objs = ptr(0), num = 0, nch = 0;   // carregado 
 function refrescar() { try { objs = g.readPointer(); num = g.add(0x14).readS32(); nch = g.add(0x1c).readS32(); } catch (e) { num = 0; } return num > 100000 && !objs.isNull(); }
 const MORTO = (1 << 28) | (1 << 29) | (1 << 21);
 // cfg: 0 hud, 1 fReceiveDrawHUD, 2 ProcessEvent, 3 obj, 4 func, 5 parms, 6 pendente
-const cfg = Memory.alloc(8 * 8); for (let i = 0; i < 8; i++) cfg.add(i * 8).writeU64(0);
+const cfg = Memory.alloc(12 * 8); for (let i = 0; i < 12; i++) cfg.add(i * 8).writeU64(0);   // cfg[7] = UFunction ReceiveVoice, cfg[8] = mudo
 const pI = Memory.alloc(32); pI.writeByteArray(new Array(32).fill(0));   // InitVoice(AController* Controller) -> bool
 const cm = new CModule(`
 #include <gum/guminterceptor.h>
 #include <stdint.h>
-extern uint64_t cfg[8];
+extern uint64_t cfg[12];
 typedef void (*PE) (void *, void *, void *);
 void onEnter (GumInvocationContext * ic)
 {
@@ -37,8 +40,38 @@ void onEnter (GumInvocationContext * ic)
     cfg[6] = 0;
     ((PE) cfg[2]) ((void *) cfg[3], (void *) cfg[4], (void *) cfg[5]);
   }
+  if (f != 0 && f == (void *) cfg[7] && cfg[8])
+  {
+    uint8_t * p = (uint8_t *) gum_invocation_context_get_nth_argument (ic, 2);
+    if (p != 0) *(int *) (p + 0x10) = 0;   /* CompressedVoiceData.ArrayNum = 0: nada para tocar */
+  }
 }
 `, { cfg });
+const TECLA_VK = 0x78;   // F9
+let vozLigada = true, teclaAntes = false, fRecv = ptr(0);
+const u32 = Process.getModuleByName('user32.dll');
+const GetAsyncKeyState = new NativeFunction(u32.getExportByName('GetAsyncKeyState'), 'int16', ['int']);
+const GetForegroundWindow = new NativeFunction(u32.getExportByName('GetForegroundWindow'), 'pointer', []);
+const GetWindowThreadProcessId = new NativeFunction(u32.getExportByName('GetWindowThreadProcessId'), 'uint32', ['pointer', 'pointer']);
+const pidBuf = Memory.alloc(8);
+function jogoEmFoco() { try { const h = GetForegroundWindow(); if (h.isNull()) return false; GetWindowThreadProcessId(h, pidBuf); return pidBuf.readU32() === Process.id; } catch (e) { return false; } }
+setInterval(function () {   // borda de descida da tecla: alterna
+  try {
+    const d = (GetAsyncKeyState(TECLA_VK) & 0x8000) !== 0;
+    if (d && !teclaAntes && jogoEmFoco()) { vozLigada = !vozLigada; log('chat de voz ' + (vozLigada ? 'LIGADO' : 'DESLIGADO') + ' (F9)'); aplicarEstado(); }
+    teclaAntes = d;
+  } catch (e) {}
+}, 60);
+function aplicarEstado() {   // escreve no pawn local; chamada a cada ciclo para vencer o jogo que reinicia os valores
+  try {
+    if (pcl.isNull()) return;
+    const pw = pcl.add(0x2D0).readPointer(); if (pw.isNull() || classe(pw).indexOf('SurvivalPlayer') !== 0) return;
+    if (fRecv.isNull()) { fRecv = acharFuncao(pw, 'ReceiveVoice'); if (!fRecv.isNull()) cfg.add(56).writeU64(uint64(fRecv.toString())); }
+    cfg.add(64).writeU64(vozLigada ? 0 : 1);
+    if (vozLigada) { if (pw.add(0x2980).readU8() === 0 && pw.add(0x1681).readU8() === 0) pw.add(0x1681).writeU8(1); }
+    else if (pw.add(0x1681).readU8() !== 0) pw.add(0x1681).writeU8(0);
+  } catch (e) {}
+}
 let i = 0, hud = ptr(0), pcl = ptr(0), anexado = false, buscando = false;
 let pawnOk = ptr(0), tentativas = 0, proxTent = 0, aguardando = false, tIni = 0, fInit = ptr(0), vmUsado = ptr(0);
 function passo() {
@@ -68,12 +101,12 @@ function ciclo() {
     if (buscando || pcl.isNull()) return;
     if (classe(hud) !== 'BP_GameHUD_C' || classe(pcl) !== 'SurvPC_C') { cfg.add(48).writeU64(0); hud = ptr(0); pcl = ptr(0); i = 0; setTimeout(passo, 500); return; }   // trocou de mapa
     const pw = pcl.add(0x2D0).readPointer(); if (pw.isNull() || classe(pw).indexOf('SurvivalPlayer') !== 0) return;
-    if (pw.add(0x2980).readU8() === 0 && pw.add(0x1681).readU8() === 0) pw.add(0x1681).writeU8(1);   // AllowVoice (BlockVoiceChat = 0)
+    aplicarEstado();   // AllowVoice = 1 (e volume) se ligado; 0 se desligado
     if (aguardando) {   // pedido enviado: espera o gancho executar (ate 5 s)
       if (cfg.add(48).readU64().toNumber() === 0) {
         const r = pI.add(8).readU8();
         aguardando = false; tentativas++;
-        if (r === 1) { pawnOk = pw; log('InitVoice OK (tentativa ' + tentativas + ', pawn ' + pw + '): microfone aberto'); }
+        if (r === 1) { pawnOk = pw;  log('InitVoice OK (tentativa ' + tentativas + ', pawn ' + pw + '): microfone aberto'); }
         else { log('InitVoice devolveu falso (tentativa ' + tentativas + ')'); proxTent = Date.now() + (tentativas < 6 ? 3000 : 30000); }
       } else if (Date.now() - tIni > 5000) { aguardando = false; cfg.add(48).writeU64(0); proxTent = Date.now() + 3000; }
       return;

@@ -20,10 +20,10 @@ const MAXL = 6, CAP = 64;
 // Idioma: o carregador troca __IDIOMA__ pelo idioma escolhido no launcher (pt/en/es/ru); sem troca, ingles.
 const IDIOMA_CFG = '__IDIOMA__';
 const TXT = {
-  pt: { grupo: 'GRUPO', lider: 'lider', morto: 'MORTO' },
-  en: { grupo: 'GROUP', lider: 'leader', morto: 'DEAD' },
-  es: { grupo: 'GRUPO', lider: 'líder', morto: 'MUERTO' },
-  ru: { grupo: 'ГРУППА', lider: 'лидер', morto: 'МЁРТВ' }
+  pt: { grupo: 'GRUPO', lider: 'lider', morto: 'MORTO', voz: 'VOZ' },
+  en: { grupo: 'GROUP', lider: 'leader', morto: 'DEAD', voz: 'VOICE' },
+  es: { grupo: 'GRUPO', lider: 'líder', morto: 'MUERTO', voz: 'VOZ' },
+  ru: { grupo: 'ГРУППА', lider: 'лидер', morto: 'МЁРТВ', voz: 'ГОЛОС' }
 };
 const T = TXT[IDIOMA_CFG] || TXT.en;
 
@@ -153,8 +153,10 @@ function fpsPing() {
     const fps = (c - fAnt) * 1000 / (t - tAnt); fAnt = c; tAnt = t; fpsS = fpsS ? fpsS * 0.6 + fps * 0.4 : fps;
     let ping = '';
     if (!pcl.isNull() && classe(pcl) === 'SurvPC_C') { const ps = pcl.add(0x298).readPointer(); if (!ps.isNull()) ping = '  |  ' + (ps.add(0x298).readU8() * 4) + ' ms'; }
+    let voz = '';
+    if (!pcl.isNull()) { const pw = pcl.add(0x2D0).readPointer(); if (!pw.isNull()) voz = '  |  ' + T.voz + ' ' + (pw.add(0x1681).readU8() ? 'ON' : 'OFF'); }
     const sx = cfg.add(72).readU64().toNumber();
-    linha(MAXL, 'FPS ' + Math.round(fpsS) + ping, false, 12); lin.add(MAXL * 0x40).add(0x20).writeFloat(Math.max(100, sx - 190));
+    linha(MAXL, 'FPS ' + Math.round(fpsS) + ping + voz, false, 12); lin.add(MAXL * 0x40).add(0x20).writeFloat(Math.max(100, sx - 190));
     cfg.add(80).writeU64(1);
   } catch (e) {}
 }
