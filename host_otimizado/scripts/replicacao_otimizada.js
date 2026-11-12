@@ -737,7 +737,8 @@ const evento = new NativeCallback(function (tipo, lista, a, x) {
   try {
     if (tipo === EV.ABERTO) {
       const c = classe(a);
-      if (lista <= 4) log('[repl] canal aberto: ' + LISTA[lista] + ' ' + c + ' @' + a + ' ch=0x' + x.toString(16));
+      // 12/11: o log "extra" saia SEM limite (36 mil linhas em 4 h, 6 mil so de WorldSettings; 5,5 MB). Agora 3 por classe e lista, como o [dist].
+      if (lista <= 4) { const kk = lista + c; abertosPorClasse[kk] = (abertosPorClasse[kk] || 0) + 1; if (abertosPorClasse[kk] <= 3) log('[repl] canal aberto: ' + LISTA[lista] + ' ' + c + ' @' + a + ' ch=0x' + x.toString(16)); }
       else if (lista === 5) log('[donos] canal aberto (dono): ' + c + ' @' + a + ' dono=' + classe(a.add(0x140).readPointer()));
       else { abertosPorClasse[c] = (abertosPorClasse[c] || 0) + 1; if (abertosPorClasse[c] <= 3) log('[dist] canal aberto (distancia): ' + c + ' @' + a); }
     } else if (tipo === EV.REPL1) {

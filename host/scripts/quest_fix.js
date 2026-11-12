@@ -45,24 +45,51 @@ globalThis.__tdbQuestFix = { parms };
 // 4 num | 5 nch | 6 idx FName da zona | 7 idx FName do LootPoint | 8 mascara de mortos | 9 offset QuestList | 10 nZonas | 11 nLoot | 12 comLista
 const blk = Memory.alloc(16 * 8); for (let i = 0; i < 16; i++) blk.add(i * 8).writeU64(0);
 const zon = Memory.alloc(512 * 8);
+// v4 (12/11): classificacao de classes feita no JS (try/catch protege de ponteiro invalido), nao no C. O C so consulta a tabela abaixo:
+// kc = ponteiros de classe (hash aberto, 16384 entradas), kv = 0 pendente / 1 herda de LootPoint_C / 2 nao herda; unk = indices pendentes; blk[13] = quantos.
+// A v3 subia a cadeia de superclasses DENTRO da thread do jogo e o host morreu (process-terminated) 3 vezes seguidas na subida (12/11 16:45-16:49).
+const TAB = 16384;
+const kc = Memory.alloc(TAB * 8), kv = Memory.alloc(TAB), unk = Memory.alloc(4096 * 8);
+kc.writeByteArray(new Uint8Array(TAB * 8)); kv.writeByteArray(new Uint8Array(TAB)); unk.writeByteArray(new Uint8Array(4096 * 8));
+// Etapa de teste: false = so CONTA (registra LootPoints e nao preenche nenhuma zona). Passar a true depois de provar que a contagem nao derruba o host.
+const PREENCHER = true;   // etapa 2 (12/11): etapa 1 (so contar) provada estavel: 12.496 LootPoints, host de pe
+function resolver(n) {
+  let sim = 0, nao = 0;
+  for (let i = 0; i < n && i < 4096; i++) {
+    const ix = unk.add(i * 8).readU64().toNumber(); let r = 2;
+    try {
+      let c = kc.add(ix * 8).readPointer();
+      for (let d = 0; d < 12 && !c.isNull(); d++) { if (c.add(0x18).readU32() === idxL) { r = 1; break; } c = c.add(0x40).readPointer(); }
+    } catch (e) { r = 2; }
+    kv.add(ix).writeU8(r); if (r === 1) sim++; else nao++;
+  }
+  return sim + '/' + nao;
+}
 let fUber = null, fila = [], feitas = new Set(), ultimo = '', iguais = 0, rodadas = 0;
 let idxZ = -1, idxL = -1, esperandoRes = false, querResultado = false, proxima = 0, ocupadoAte = 0;
 
+// v4 etapa 2: UMA zona por chamada, e o pedido (blk[2]) e rearmado pelo JS a cada ~600 ms (antes: 4 zonas por quadro, todas de uma vez).
+// Antes de cada zona sai uma linha no log; se o host cair, a ultima linha mostra em qual zona foi.
+let totalFila = 0;
 const processar = new NativeCallback(function () {   // thread do jogo, so quando ha zona na fila
   try {
-    for (let n = 0; n < 4 && fila.length; n++) {
+    while (fila.length) {
       const z = fila.shift(); const k = z.toString();
       if (feitas.has(k)) continue;
       feitas.add(k);
       try {
         if (classe(z) !== 'BP_QuestItemsSpawnZone_C') continue;   // destruida entre a varredura e agora
+        log('preenchendo zona ' + (totalFila - fila.length) + '/' + totalFila + ' @' + z);
         parms.writeS32(ENTRADA_BAUS);
         processEvent(z, fUber, parms);
       } catch (e) { log('erro na zona ' + z + ': ' + e); }
+      break;
     }
   } catch (e) { log('erro processando: ' + e); }
-  if (!fila.length) blk.add(16).writeS32(0);
+  blk.add(16).writeS32(0);
+  if (!fila.length && totalFila) { log('zonas preenchidas: ' + feitas.size); totalFila = 0; }
 }, 'void', []);
+setInterval(function () { try { if (fila.length) blk.add(16).writeS32(1); } catch (e) {} }, 600);
 
 const cm = new CModule(`
 #include <gum/guminterceptor.h>
@@ -70,25 +97,24 @@ const cm = new CModule(`
 extern void processar (void);
 extern uint64_t blk[16];
 extern uint64_t zon[512];
-/* 12/11 (v3): a v2 contava so a classe EXATA LootPoint_C. No mapa ha 0 delas: sao ~13 mil instancias, todas de classes FILHAS
-   (LP_WoodenBox_C, BP_RightDoorLP_C, LP_PelicanCase_C...). Resultado: LootPoints=0 para sempre, o mapa nunca "estabilizava" (precisa
-   de 100) e a QuestList dos baus nunca era preenchida. Agora sobe a cadeia de superclasses (UStruct::SuperStruct em +0x40), com cache
-   por ponteiro de classe (mapa direto de 4096 entradas) para nao subir a cadeia para cada um dos ~1,1 milhao de objetos. */
-static uint64_t kc[4096];
-static uint8_t kv[4096];
-static int eh_loot (uint8_t * cls, uint32_t idxL)
+extern uint64_t kc[16384];
+extern uint8_t kv[16384];
+extern uint64_t unk[4096];
+/* so consulta a tabela (nao desreferencia nada alem do que a v2 ja lia); classe nova entra pendente e o JS resolve depois */
+static int eh_loot (uint8_t * cls)
 {
-  uint32_t h = (uint32_t) (((uint64_t) cls >> 4) & 4095);
-  uint8_t * c = cls;
-  int d, r = 0;
-  if (kc[h] == (uint64_t) cls) return kv[h];
-  for (d = 0; d < 12 && c != 0; d++)
+  uint32_t h = (uint32_t) (((uint64_t) cls >> 4) & 16383), p, ix;
+  for (p = 0; p < 32; p++)
   {
-    if (*(uint32_t *) (c + 0x18) == idxL) { r = 1; break; }
-    c = *(uint8_t **) (c + 0x40);
+    ix = (h + p) & 16383;
+    if (kc[ix] == (uint64_t) cls) return kv[ix] == 1;
+    if (kc[ix] == 0)
+    {
+      if (blk[13] < 4096) { kc[ix] = (uint64_t) cls; kv[ix] = 0; unk[blk[13]] = ix; blk[13]++; }
+      return 0;
+    }
   }
-  kc[h] = (uint64_t) cls; kv[h] = (uint8_t) r;
-  return r;
+  return 0;
 }
 static void varrer (void)
 {
@@ -96,6 +122,7 @@ static void varrer (void)
   int num = (int) blk[4], nch = (int) blk[5], morto = (int) blk[8], offq = (int) blk[9];
   uint32_t idxZ = (uint32_t) blk[6], idxL = (uint32_t) blk[7];
   int nz = 0, loot = 0, cl = 0, i;
+  blk[13] = 0;
   for (i = 0; i < num; i++)
   {
     int ch = i >> 16;
@@ -113,7 +140,7 @@ static void varrer (void)
     if (cls == 0) continue;
     ci = *(uint32_t *) (cls + 0x18);
     if (ci == idxZ) { if (nz < 512) zon[nz] = (uint64_t) o; nz++; }
-    else if (eh_loot (cls, idxL)) { loot++; if (*(int *) (o + offq + 8) > 0) cl++; }
+    else if (eh_loot (cls)) { loot++; if (*(int *) (o + offq + 8) > 0) cl++; }
   }
   blk[10] = (uint64_t) nz; blk[11] = (uint64_t) loot; blk[12] = (uint64_t) cl;
 }
@@ -122,7 +149,7 @@ void onEnter (GumInvocationContext * ic)
   if (blk[0]) { varrer (); blk[0] = 0; blk[1] = 1; }
   if (blk[2]) processar ();
 }
-`, { processar, blk, zon });
+`, { processar, blk, zon, kc, kv, unk });
 Interceptor.attach(B.add(0x42f3650), cm);   // UNetDriver::TickFlush (thread do jogo)
 
 function acharUber(zona) {
@@ -136,7 +163,15 @@ function pedir() {
   blk.add(48).writeU64(idxZ); blk.add(56).writeU64(idxL); blk.add(64).writeU64(MORTO); blk.add(72).writeU64(QUESTLIST);
   blk.add(8).writeU64(0); blk.add(0).writeU64(1); esperandoRes = true;
 }
+let rodadasResolver = 0;
 function consumir() {
+  const nu = blk.add(104).readS32();
+  if (nu > 0 && rodadasResolver < 8) {   // classes novas: o JS resolve (com try/catch) e a varredura repete para contar certo
+    rodadasResolver++; const r = resolver(nu);
+    if (rodadasResolver <= 2) log('classes novas resolvidas: ' + nu + ' (herdam de LootPoint_C / nao: ' + r + ')');
+    pedir(); return;
+  }
+  rodadasResolver = 0;
   const nz = blk.add(80).readS32(), loot = blk.add(88).readS32(), comLista = blk.add(96).readS32();
   if (querResultado) { querResultado = false; log('RESULTADO: LootPoints com QuestList: ' + comLista + ' de ' + loot + ' (zonas processadas: ' + feitas.size + ')'); return; }
   const zonas = []; for (let i = 0; i < nz && i < 512; i++) zonas.push(zon.add(i * 8).readPointer());
@@ -147,12 +182,16 @@ function consumir() {
     if (rodadas === 0 && iguais <= 3) log('esperando o mapa estabilizar: zonas=' + nz + ' LootPoints=' + loot + ' (estavel ' + iguais + '/3)');
     return;
   }
+  if (!PREENCHER) {
+    if (rodadas === 0) { rodadas++; log('[teste v4: SO CONTA] mapa estavel: zonas=' + nz + ', LootPoints=' + loot + ', com QuestList=' + comLista + ' (nao preenche nada)'); }
+    return;
+  }
   if (fUber === null) { fUber = acharUber(novas[0]); log(fUber.isNull() ? 'ERRO: ExecuteUbergraph_BP_QuestItemsSpawnZone nao achada' : 'funcao ' + fUber); }
   if (fUber.isNull()) return;
   rodadas++;
   log('mapa estavel (zonas=' + nz + ', LootPoints=' + loot + ', com QuestList=' + comLista + '): preenchendo baus de ' + novas.length + ' zona(s)');
-  fila = novas.slice(); blk.add(16).writeS32(1);
-  ocupadoAte = Date.now() + 25000;   // depois disso, uma varredura para o log de RESULTADO
+  fila = novas.slice(); totalFila = fila.length; blk.add(16).writeS32(1);
+  ocupadoAte = Date.now() + 25000 + fila.length * 800;   // depois disso, uma varredura para o log de RESULTADO
 }
 setInterval(function () {   // JS leve: 1x por segundo
   try {
