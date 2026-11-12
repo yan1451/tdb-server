@@ -327,6 +327,27 @@ def main() -> int:
         script_aparencia = session.create_script(aparencia.read_text(encoding="utf-8"))
         script_aparencia.on("message", on_message)
         script_aparencia.load()
+    # 12/11: extras de jogo, cada um em script separado (um erro nele nao derruba os outros). Todos esperam o jogador entrar no mapa
+    # (o jogo e aberto aqui antes de existir a GObjects) e se refazem ao trocar de mapa:
+    #   voz_cliente.js        chat de voz de proximidade (AllowVoice + VoipManager.InitVoice; o jogo traz o recurso mas nao o liga)   --sem-voz
+    #   hud_grupo_cliente.js  lista do grupo (nome do personagem, lider, barra de vida) no canto da tela, no idioma do launcher    --sem-hud-grupo
+    #   vida_jogo_cliente.js  conserta a barra de vida da HUD de baixo (nada chamava o SetValue do widget)                        --sem-vida
+    idioma = "en"
+    try:
+        import json as _json
+        idioma = _json.loads((Path(__file__).resolve().parent.parent / "launcher" / "config.json").read_text(encoding="utf-8")).get("idioma", "en")
+    except Exception:
+        pass
+    for arq, flag in (("voz_cliente.js", "--sem-voz"), ("hud_grupo_cliente.js", "--sem-hud-grupo"), ("vida_jogo_cliente.js", "--sem-vida")):
+        p = DIR / arq
+        if flag in sys.argv or not p.exists():
+            continue
+        try:
+            s_extra = session.create_script(p.read_text(encoding="utf-8").replace("__IDIOMA__", idioma))
+            s_extra.on("message", on_message)
+            s_extra.load()
+        except Exception as e:   # nunca impede o jogo de abrir
+            print(f"AVISO: {arq} nao carregou: {e}", flush=True)
     # Monitor opcional (somente leitura) do GPS no cliente, em script separado para um erro nele nao derrubar os demais.
     extra = DIAG / "monitor_gps_cliente.js"
     if diag and extra.exists():
