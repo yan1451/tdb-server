@@ -70,6 +70,26 @@ const cm = new CModule(`
 extern void processar (void);
 extern uint64_t blk[16];
 extern uint64_t zon[512];
+/* 12/11 (v3): a v2 contava so a classe EXATA LootPoint_C. No mapa ha 0 delas: sao ~13 mil instancias, todas de classes FILHAS
+   (LP_WoodenBox_C, BP_RightDoorLP_C, LP_PelicanCase_C...). Resultado: LootPoints=0 para sempre, o mapa nunca "estabilizava" (precisa
+   de 100) e a QuestList dos baus nunca era preenchida. Agora sobe a cadeia de superclasses (UStruct::SuperStruct em +0x40), com cache
+   por ponteiro de classe (mapa direto de 4096 entradas) para nao subir a cadeia para cada um dos ~1,1 milhao de objetos. */
+static uint64_t kc[4096];
+static uint8_t kv[4096];
+static int eh_loot (uint8_t * cls, uint32_t idxL)
+{
+  uint32_t h = (uint32_t) (((uint64_t) cls >> 4) & 4095);
+  uint8_t * c = cls;
+  int d, r = 0;
+  if (kc[h] == (uint64_t) cls) return kv[h];
+  for (d = 0; d < 12 && c != 0; d++)
+  {
+    if (*(uint32_t *) (c + 0x18) == idxL) { r = 1; break; }
+    c = *(uint8_t **) (c + 0x40);
+  }
+  kc[h] = (uint64_t) cls; kv[h] = (uint8_t) r;
+  return r;
+}
 static void varrer (void)
 {
   uint64_t ** objs = (uint64_t **) blk[3];
@@ -93,7 +113,7 @@ static void varrer (void)
     if (cls == 0) continue;
     ci = *(uint32_t *) (cls + 0x18);
     if (ci == idxZ) { if (nz < 512) zon[nz] = (uint64_t) o; nz++; }
-    else if (ci == idxL) { loot++; if (*(int *) (o + offq + 8) > 0) cl++; }
+    else if (eh_loot (cls, idxL)) { loot++; if (*(int *) (o + offq + 8) > 0) cl++; }
   }
   blk[10] = (uint64_t) nz; blk[11] = (uint64_t) loot; blk[12] = (uint64_t) cl;
 }
