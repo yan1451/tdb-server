@@ -66,6 +66,9 @@ if "--sem-monitores" not in sys.argv:
 # resgate_queda.js (06/11): unstuck automatico (6 s caindo ou abaixo do mapa) e manual (linux/unstuck.sh). --sem-resgate desliga.
 if "--sem-resgate" not in sys.argv:
     SCRIPTS.append("resgate_queda.js")
+# 10/11: diagnostico de desempenho: TDB_SEM_SCRIPTS=a.js,b.js tira scripts da lista (bisseccao do atraso do host).
+for _x in [t for t in os.environ.get("TDB_SEM_SCRIPTS", "").split(",") if t]:
+    if _x in SCRIPTS: SCRIPTS.remove(_x)
 # LocalAppData proprio (06/11): na porta de teste (ou com --appdata-separado) a instancia usa outra pasta LocalAppData, porque o banco
 # local do Firestore (LevelDB com LOCK) em %LOCALAPPDATA%\firestore so abre em um processo por usuario (a 2a instancia caia).
 APPDATA_SEPARADO = ("--appdata-separado" in sys.argv) or PORTA != 7777

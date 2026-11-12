@@ -207,10 +207,11 @@ function mundoAtual() {
 }
 
 // ---------- gatilho na thread do jogo (UWorld::Tick usado so como relogio) ----------
-let errosGatilho = 0;
-Interceptor.attach(B.add(RVA.worldTick), {
+let errosGatilho = 0, ltMundo = null;
+// 12/11: o gancho em JS custa uma chamada por quadro; depois do listen ele nao faz mais nada, entao se solta sozinho.
+ltMundo = Interceptor.attach(B.add(RVA.worldTick), {
   onEnter() {
-    if (feito) return;
+    if (feito) { if (ltMundo) { const l = ltMundo; ltMundo = null; setTimeout(function () { try { l.detach(); log('gancho do relogio do mundo solto (listen ja aberto)'); } catch (e) {} }, 0); } return; }
     try {
       if (idxGameNetDriver < 0 || idxTdbGm < 0 || idxWorld < 0) {   // FNames so existem depois que o motor/Blueprints carregam
         if (++tentFName % 300 !== 0) return;
@@ -237,13 +238,27 @@ Interceptor.attach(B.add(RVA.worldTick), {
 });
 
 // ---------- medicoes (somente leitura) ----------
-Interceptor.attach(B.add(RVA.tickDispatch), {
-  onEnter(args) {
-    if (drv.isNull() || !args[0].equals(drv)) return;
-    nTick++;
-    if (nTick === 1 || nTick % 600 === 0) log('TickDispatch do listen: ' + nTick);
-  }
-});
+// 12/11: contador em C (antes: um gancho JS por chamada); o JS so le o valor 1x por segundo
+const tdBuf = Memory.alloc(16); tdBuf.writeU64(0); tdBuf.add(8).writeU64(0);
+const cmTD = new CModule(`
+#include <gum/guminterceptor.h>
+#include <stdint.h>
+extern uint64_t tdBuf[2];
+void onEnter (GumInvocationContext * ic)
+{
+  if (tdBuf[0] != 0 && (uint64_t) gum_invocation_context_get_nth_argument (ic, 0) == tdBuf[0]) tdBuf[1]++;
+}
+`, { tdBuf });
+Interceptor.attach(B.add(RVA.tickDispatch), cmTD);
+let tdLog = 0;
+setInterval(function () {
+  try {
+    if (drv.isNull()) return;
+    if (tdBuf.readU64().toNumber() === 0) tdBuf.writePointer(drv);
+    nTick = tdBuf.add(8).readU64().toNumber();
+    if (nTick >= 1 && (tdLog === 0 || nTick - tdLog >= 600)) { tdLog = nTick; log('TickDispatch do listen: ' + nTick); }
+  } catch (e) {}
+}, 1000);
 Interceptor.attach(B.add(RVA.notifyControlMessage), {
   onEnter(args) {
     try {

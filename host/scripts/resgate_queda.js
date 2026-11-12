@@ -79,8 +79,9 @@ setInterval(function () {
 
 const est = new Map();   // pc -> { pawn, ult, parado, seguro, caindo, resgates:[t] }
 let drv = ptr(0), proxima = 0, erros = 0;
-Interceptor.attach(B.add(0x42f3650), {
-  onEnter(a) {
+const tickCb = new NativeCallback(function (a0) {
+  const a = [a0];
+  {
     try {
       if (drv.isNull()) { if (classe(a[0]) !== 'IpNetDriver' || !a[0].add(0x98).readPointer().isNull()) return; drv = a[0]; log('driver ' + drv); }
       if (!a[0].equals(drv)) return;
@@ -117,6 +118,18 @@ Interceptor.attach(B.add(0x42f3650), {
       for (const k of Array.from(est.keys())) if (!vistos.has(k)) est.delete(k);
     } catch (e) { if (++erros <= 5) log('erro: ' + e); }
   }
-});
+}, 'void', ['pointer']);
+const tickN = Memory.alloc(8); tickN.writeS32(0);
+// 12/11: o gancho do TickFlush agora e nativo (CModule) e so chama o JS a cada 15 quadros (~0,5 s): antes era uma chamada JS por quadro
+// (a thread do jogo esperava a trava do Frida). Todo o trabalho deste script ja tinha limite de ~1 s.
+Interceptor.attach(B.add(0x42f3650), new CModule(`
+#include <gum/guminterceptor.h>
+extern void tickCb (void * drv);
+extern int tickN[1];
+void onEnter (GumInvocationContext * ic)
+{
+  if (++tickN[0] >= 15) { tickN[0] = 0; tickCb (gum_invocation_context_get_nth_argument (ic, 0)); }
+}
+`, { tickCb, tickN }));
 log('pronto: resgate de queda (automatico: ' + QUEDA_S + ' s caindo ou Z < ' + (Z_MIN / 100) + ' m; manual: ' + ARQ + ')');
 })();

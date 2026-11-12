@@ -23,18 +23,14 @@ const vistos = new Set();
 
 function semente() { return Math.floor((Date.now() / 1000 - BASE_2026) * 8); }
 
-function acharGameModes() {
-  const g = B.add(0x7ccda10), objs = g.readPointer(), num = g.add(0x14).readS32(), nch = g.add(0x1c).readS32();
+function acharGameModes() {   // 12/11: pelo mundo (engine -> lista de mundos -> world+0x150), sem varrer a GObjects em JS
   const r = [];
-  for (let i = 0; i < num; i++) {
-    const ch = (i / 0x10000) | 0; if (ch >= nch) break;
-    try {
-      const it = objs.add(ch * 8).readPointer().add((i % 0x10000) * 0x18);
-      const o = it.readPointer(); if (o.isNull()) continue;
-      if (it.add(8).readS32() & MORTO) continue;
-      if (classe(o) === 'TDB_GameMode_C' && nome(o).indexOf('Default__') !== 0) r.push(o);
-    } catch (e) {}
-  }
+  try {
+    const eng = B.add(0x7e20ea8).readPointer(); if (eng.isNull()) return r;
+    const w = eng.add(0xec0).readPointer().readPointer().add(0x2c0).readPointer(); if (w.isNull()) return r;
+    const gm = w.add(0x150).readPointer();
+    if (!gm.isNull() && classe(gm) === 'TDB_GameMode_C') r.push(gm);
+  } catch (e) {}
   return r;
 }
 
@@ -54,9 +50,6 @@ function revisar() {
   } catch (e) { log('erro: ' + e); }
 }
 revisar();
-// 10/11: varre a GObjects (pesado) a cada 10 s so nos 5 primeiros minutos (o GameMode e recriado na viagem para o mapa do jogo);
-// depois, a cada 2 min.
-const inicio = Date.now();
-(function laco() { revisar(); setTimeout(laco, (Date.now() - inicio < 300000) ? 10000 : 120000); })();
+setInterval(revisar, 5000);   // barato (so le ponteiros); o GameMode e recriado na viagem para o mapa do jogo
 log('pronto: contador de ID dos itens comeca de ' + semente() + ' (antes: 0 a cada subida do servidor)');
 })();

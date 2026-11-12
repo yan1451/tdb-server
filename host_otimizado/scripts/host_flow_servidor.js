@@ -9944,6 +9944,7 @@ function getControlYawDeg() {
   // v2 (06/11 11:57): detachAll derrubou o host 12 s depois (processo terminou sem WER). Agora solta SO o logger de ProcessEvent
   // (o hook pesado, chamado em toda UFunction do jogo) e o tick deste script so passa a retornar cedo; os outros hooks ficam.
   let leveDesde = 0, leveFeito = false;
+  let tickListenerPrincipal = null, tickListenerArmado = null;   // 12/11: soltos junto com o logger (cada hook JS custa uma chamada por quadro)
   function hostLeveTick() {
     if (leveFeito || typeof HOST_LEVE === 'undefined' || !HOST_LEVE) return;
     if (phase < PH.WAIT_PAWN) { leveDesde = 0; return; }
@@ -9951,12 +9952,15 @@ function getControlYawDeg() {
     if (Date.now() - leveDesde < 20000) return;
     leveFeito = true;
     setTimeout(function () {
-      try { if (peLoggerListener) { peLoggerListener.detach(); peLoggerListener = null; } log('HOST_LEVE: logger de ProcessEvent solto; tick do host_flow em modo minimo'); }
+      try { if (peLoggerListener) { peLoggerListener.detach(); peLoggerListener = null; }
+        if (tickListenerPrincipal) { tickListenerPrincipal.detach(); tickListenerPrincipal = null; }
+        if (tickListenerArmado) { tickListenerArmado.detach(); tickListenerArmado = null; }
+        log('HOST_LEVE: logger de ProcessEvent e ganchos do Tick soltos (o tick do host_flow nao roda mais JS)'); }
       catch (e) { log('HOST_LEVE erro ao soltar hooks: ' + e); }
     }, 0);
   }
 
-  Interceptor.attach(tickAddress, {
+  tickListenerPrincipal = Interceptor.attach(tickAddress, {
     onEnter: function () {
       try { hostLeveTick(); } catch (eHL) {}
       if (leveFeito) return;
@@ -10593,7 +10597,7 @@ function getControlYawDeg() {
   } else {
     log('GEngine null â€” esperando Tick...');
     let armed = true;
-    Interceptor.attach(tickAddress, {
+    tickListenerArmado = Interceptor.attach(tickAddress, {
       onEnter: function () {
         if (!armed) return;
         const e = getEngine();
