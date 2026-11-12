@@ -32,6 +32,7 @@ import diagnostico  # noqa: E402
 
 CFG_ARQ = AQUI / "config.json"
 CLIENTE = RAIZ / "cliente" / "cliente_conecta.py"
+RESOLUCOES = ("1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440", "3840x2160")
 HOST = RAIZ / "host" / "servidor_host.py"
 # 10/11: o Offline usa o host_otimizado (replicacao em C, sem o limite de 150 atores sempre relevantes) com os mesmos argumentos
 # da VPS. O host normal (replicacao em JS a cada quadro + monitores) rodava a 9-15 quadros/s com 1 jogador: atraso e itens demorando.
@@ -248,6 +249,20 @@ class Launcher:
         self.b_diag = tk.Button(opc, text=self.t("b_diag"), command=self.gerar_diag, **estilo2)   # 12/11: junta logs e estado do save num .zip
         self.b_diag.pack(side="right")
 
+        # 12/11: o jogo era aberto sempre em janela 1280x720 (-windowed -ResX=1280 -ResY=720) e a pessoa ficava presa nessa tela: agora escolhe o modo e a resolucao
+        tela = tk.Frame(r, bg=fundo); tela.pack(fill="x", padx=16, pady=(6, 0))
+        self.w_tela = tk.Label(tela, text=self.t("w_tela"), bg=fundo, fg=sec, font=("Segoe UI", 10)); self.w_tela.pack(side="left")
+        self.v_tela_modo = tk.StringVar()
+        self.menu_modo = tk.OptionMenu(tela, self.v_tela_modo, "")
+        self.w_res = tk.Label(tela, text=self.t("w_res"), bg=fundo, fg=sec, font=("Segoe UI", 10))
+        self.v_tela_res = tk.StringVar()
+        self.menu_res = tk.OptionMenu(tela, self.v_tela_res, "")
+        for m in (self.menu_modo, self.menu_res):
+            m.configure(bg="#2a2f37", fg=texto, activebackground="#363c46", activeforeground=texto, relief="flat", highlightthickness=0, bd=0, font=("Segoe UI", 10), cursor="hand2")
+            m["menu"].configure(bg="#2a2f37", fg=texto, activebackground="#363c46", activeforeground=texto, font=("Segoe UI", 10))
+        self.menu_modo.pack(side="left", padx=(6, 18)); self.w_res.pack(side="left"); self.menu_res.pack(side="left", padx=6)
+        self._montar_menus_tela()
+
         self.txt = scrolledtext.ScrolledText(r, bg="#0e1013", fg="#cfd6dd", insertbackground="white", font=("Consolas", 9), relief="flat", height=14)
         self.txt.pack(fill="both", expand=True, padx=16, pady=(8, 14))
         self.txt.configure(state="disabled")
@@ -263,6 +278,23 @@ class Launcher:
         else:
             self.logk("frida_falta")
             self.fila.put(("aviso", self.t("dlg_frida", py=py)))
+
+    # ------------------------------------------------------------------ tela (modo e resolucao do jogo)
+    def _montar_menus_tela(self):
+        modos = {"padrao": self.t("tela_padrao"), "janela": self.t("tela_janela"), "tela_cheia": self.t("tela_cheia")}
+        res = {"padrao": self.t("res_padrao"), "monitor": self.t("res_monitor")}
+        res.update({r: r.replace("x", " × ") for r in RESOLUCOES})
+        for menu, var, tabela, chave in ((self.menu_modo, self.v_tela_modo, modos, "tela_modo"), (self.menu_res, self.v_tela_res, res, "tela_res")):
+            atual = self.cfg.get(chave, "padrao")
+            if atual not in tabela:
+                atual = "padrao"
+            var.set(tabela[atual])
+            m = menu["menu"]; m.delete(0, "end")
+            for cod, txt in tabela.items():
+                m.add_command(label=txt, command=lambda c=cod, t=txt, v=var, k=chave: self._escolher_tela(k, c, v, t))
+
+    def _escolher_tela(self, chave: str, cod: str, var, txt: str):
+        var.set(txt); self.cfg[chave] = cod; salvar_cfg(self.cfg)
 
     def _salvar_opcoes(self):
         self.cfg["barras_fixas"] = bool(self.v_barras.get()); salvar_cfg(self.cfg)
@@ -316,6 +348,7 @@ class Launcher:
         self.w_pasta.configure(text=self.t("w_pasta"))
         self.b_escolher.configure(text=self.t("b_escolher"))
         self.chk_barras.configure(text=self.t("chk_barras"))
+        self.w_tela.configure(text=self.t("w_tela")); self.w_res.configure(text=self.t("w_res")); self._montar_menus_tela()
         self._mostrar_pasta()
         for tipo in ("estado", "servidor", "versao"):
             self._pintar(tipo)
@@ -461,6 +494,8 @@ class Launcher:
         pasta = self.pasta_jogo()
         if pasta:
             env["TDB_JOGO"] = pasta   # lida pelo cliente_conecta.py e pelo servidor_host.py
+        env["TDB_TELA_MODO"] = self.cfg.get("tela_modo", "padrao")   # padrao | janela | tela_cheia (lido pelo cliente_conecta.py)
+        env["TDB_TELA_RES"] = self.cfg.get("tela_res", "padrao")     # padrao | monitor | 1920x1080 ...
         return env
 
     # ------------------------------------------------------------------ pasta do jogo

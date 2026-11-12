@@ -181,6 +181,31 @@ def limpar_temp_frida(horas: float = 1) -> int:
     return n
 
 
+def args_tela() -> list:
+    """Modo e resolucao da tela, escolhidos no launcher (TDB_TELA_MODO / TDB_TELA_RES) ou por --tela-modo / --tela-res.
+    'padrao' nao forca nada: vale o que o jogo salvou nas proprias configuracoes. Antes (ate 12/11) o jogo era aberto sempre com -windowed -ResX=1280 -ResY=720,
+    e a pessoa ficava presa nessa janela (tela cheia caia para 720p, trocar a resolucao no jogo virava janela)."""
+    import re as _re
+    modo = os.environ.get("TDB_TELA_MODO", "padrao")
+    res = os.environ.get("TDB_TELA_RES", "padrao")
+    for i, a in enumerate(sys.argv):
+        if a == "--tela-modo" and i + 1 < len(sys.argv): modo = sys.argv[i + 1]
+        if a == "--tela-res" and i + 1 < len(sys.argv): res = sys.argv[i + 1]
+    args = []
+    if modo == "janela": args.append("-windowed")
+    elif modo == "tela_cheia": args.append("-fullscreen")
+    if res == "monitor":
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDPIAware()   # tamanho real do monitor, sem a escala do Windows
+            res = "%dx%d" % (ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1))
+        except Exception:
+            res = "padrao"
+    m = _re.fullmatch(r"(\d{3,5})x(\d{3,5})", res)
+    if m: args += ["-ResX=" + m.group(1), "-ResY=" + m.group(2)]
+    return args
+
+
 def on_message(message, data):
     line = str(message.get("payload")) if message.get("type") == "send" else str(message)
     print(line, flush=True)
@@ -293,9 +318,9 @@ def main() -> int:
     if n_lixo:
         print(f"limpeza: {n_lixo} pastas antigas do Frida apagadas do TEMP", flush=True)
     device = frida.get_local_device()
-    print("abrindo o jogo como cliente...", flush=True)
+    print("abrindo o jogo como cliente (tela: %s)..." % (" ".join(args_tela()) or "padrao do jogo"), flush=True)
     pid = device.spawn(
-        [EXE, "-windowed", "-ResX=1280", "-ResY=720", "-FullStdOutLogOutput"],
+        [EXE] + args_tela() + ["-FullStdOutLogOutput"],
         cwd=WD,
         env=env,
     )
