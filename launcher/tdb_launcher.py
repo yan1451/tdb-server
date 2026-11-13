@@ -21,7 +21,7 @@ import time
 import tkinter as tk
 import traceback
 from pathlib import Path
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent
@@ -75,9 +75,9 @@ if sys.stderr is None or sys.stdout is None:
 def frida_instalado(py: str) -> str:
     """Versao do frida no Python que vai rodar o cliente, ou '' se nao estiver instalado."""
     try:
-        r = subprocess.run([py, "-I", "-c", "import frida; print(frida.__version__)"], capture_output=True, text=True, timeout=60,
-                           creationflags=SEM_JANELA)
-        return r.stdout.strip() if r.returncode == 0 else ""
+        r = subprocess.run([py, "-I", "-c", "import frida; print(frida.__version__)"], capture_output=True, text=True,
+                           errors="replace", timeout=60, creationflags=SEM_JANELA)
+        return (r.stdout or "").strip() if r.returncode == 0 and r.stdout else ""
     except Exception:
         return ""
 
@@ -142,26 +142,47 @@ def porta_aberta(host: str, porta: int, timeout: float = 3) -> bool:
 
 def pids_escutando(portas: set) -> set:
     """PIDs com socket TCP em LISTENING nas portas dadas (netstat do Windows)."""
-    r = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, creationflags=SEM_JANELA).stdout
-    r += subprocess.run(["netstat", "-ano", "-p", "TCPv6"], capture_output=True, text=True, creationflags=SEM_JANELA).stdout
     pids = set()
-    for linha in r.splitlines():
-        p = linha.split()
-        if len(p) >= 5 and p[3].upper() == "LISTENING":
+    # Uma saida ausente (None) nao deve impedir o jogo de iniciar.
+    for protocolo in ("TCP", "TCPv6"):
+        try:
+            resultado = subprocess.run(
+                ["netstat", "-ano", "-p", protocolo],
+                capture_output=True, text=True, errors="replace", creationflags=SEM_JANELA,
+                timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            gravar_log(f"Aviso: netstat {protocolo} falhou: {exc}")
+            continue
+        if resultado.returncode != 0:
+            gravar_log(f"Aviso: netstat {protocolo} retornou codigo {resultado.returncode}: {(resultado.stderr or '').strip()}")
+            continue
+        for linha in (resultado.stdout or "").splitlines():
+            campos = linha.split()
+            if len(campos) < 5 or campos[3].upper() != "LISTENING":
+                continue
             try:
-                porta = int(p[1].rsplit(":", 1)[1])
+                porta = int(campos[1].rsplit(":", 1)[1])
+                pid = int(campos[4])
             except (ValueError, IndexError):
                 continue
             if porta in portas:
-                pids.add(int(p[4]))
+                pids.add(pid)
     return pids
 
 
 def imagem_do_pid(pid: int) -> str:
-    r = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/FO", "CSV", "/NH"], capture_output=True, text=True,
-                       creationflags=SEM_JANELA).stdout.strip()
-    return r.split('","')[0].strip('"').lower() if r.startswith('"') else ""
-
+    try:
+        resultado = subprocess.run(
+            ["tasklist", "/FI", "PID eq %d" % pid, "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, errors="replace", creationflags=SEM_JANELA, timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if resultado.returncode != 0:
+        return ""
+    linha = (resultado.stdout or "").strip()
+    return linha.split('","')[0].strip('"').lower() if linha.startswith('"') else ""
 
 def matar(pid: int) -> None:
     subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, creationflags=SEM_JANELA)
@@ -194,8 +215,8 @@ class Launcher:
     def _montar(self):
         r = self.r
         r.title("TDB Launcher")
-        r.geometry("980x700")
-        r.minsize(820, 620)
+        r.geometry("980x760")
+        r.minsize(820, 660)
 
         # Палитра: тёмный игровой интерфейс с холодными акцентами
         bg = "#090D14"
@@ -209,6 +230,23 @@ class Launcher:
         green = "#A9E86A"
         r.configure(bg=bg)
 
+        # duas abas: Jogar (tudo o que ja existia) e Instalador (confere/instala Python, Frida, Node, Java e Firebase)
+        estilo = ttk.Style()
+        try:
+            estilo.theme_use("clam")
+        except tk.TclError:
+            pass
+        estilo.configure("TDB.TNotebook", background=bg, borderwidth=0, tabmargins=(30, 12, 30, 0))
+        estilo.configure("TDB.TNotebook.Tab", background=panel2, foreground=muted, padding=(22, 9), font=("Segoe UI", 10, "bold"), borderwidth=0)
+        estilo.map("TDB.TNotebook.Tab", background=[("selected", accent)], foreground=[("selected", "#10170A")])
+        estilo.configure("TDB.Horizontal.TProgressbar", troughcolor=panel2, background=accent, borderwidth=0, thickness=8)
+        self.nb = ttk.Notebook(r, style="TDB.TNotebook")
+        self.nb.pack(fill="both", expand=True)
+        aba1 = tk.Frame(self.nb, bg=bg); aba2 = tk.Frame(self.nb, bg=bg)
+        self.nb.add(aba1, text=self.t("aba_jogar")); self.nb.add(aba2, text=self.t("aba_inst"))
+        self._montar_instalador(aba2, bg, panel, panel2, border, white, muted, accent, green)
+        self.nb.bind("<<NotebookTabChanged>>", self._aba_mudou)
+
         def card(parent, color=panel, padx=18, pady=16):
             frame = tk.Frame(parent, bg=color, highlightthickness=1,
                              highlightbackground=border, bd=0)
@@ -221,7 +259,7 @@ class Launcher:
                             **kwargs)
 
         # Верхняя панель
-        top = tk.Frame(r, bg=bg)
+        top = tk.Frame(aba1, bg=bg)
         top.pack(fill="x", padx=30, pady=(24, 18))
         brand = tk.Frame(top, bg=bg)
         brand.pack(side="left", fill="x", expand=True)
@@ -252,7 +290,7 @@ class Launcher:
 
 
         # Статусные карточки
-        statuses = tk.Frame(r, bg=bg)
+        statuses = tk.Frame(aba1, bg=bg)
         statuses.pack(fill="x", padx=30, pady=(0, 16))
         statuses.columnconfigure(0, weight=1)
         statuses.columnconfigure(1, weight=1)
@@ -271,7 +309,7 @@ class Launcher:
         self.lbl_versao.pack(anchor="w", pady=(7, 0))
 
         # Центральная область: запуск и настройки
-        content = tk.Frame(r, bg=bg)
+        content = tk.Frame(aba1, bg=bg)
         content.pack(fill="x", padx=30, pady=(0, 14))
         play = card(content, panel, 18, 15)
         play.pack(side="left", fill="both", expand=True, padx=(0, 8))
@@ -337,7 +375,7 @@ class Launcher:
         self.chk_barras.pack(anchor="w")
 
         # Нижняя панель инструментов
-        tools = tk.Frame(r, bg=bg)
+        tools = tk.Frame(aba1, bg=bg)
         tools.pack(fill="x", padx=30, pady=(0, 10))
         toolstyle = dict(bg="#1A2736", fg="#C7D3E1", activebackground="#2A3C51",
                          activeforeground=white, relief="flat", bd=0,
@@ -355,7 +393,7 @@ class Launcher:
         label(tools, "TDB COMMUNITY LAUNCHER", 8, "#52657B", True).pack(side="right", pady=10)
 
         # Консоль логов
-        logs = card(r, "#0D141E", 12, 10)
+        logs = card(aba1, "#0D141E", 12, 10)
         logs.pack(fill="both", expand=True, padx=30, pady=(0, 22))
         loghead = tk.Frame(logs, bg="#0D141E")
         loghead.pack(fill="x", pady=(0, 7))
@@ -382,6 +420,154 @@ class Launcher:
         else:
             self.logk("frida_falta")
             self.fila.put(("aviso", self.t("dlg_frida", py=py)))
+
+    # ------------------------------------------------------------------ aba Instalador
+    INST_COMP = (("py", "inst_c_py"), ("frida", "inst_c_frida"), ("node", "inst_c_node"), ("java", "inst_c_java"),
+                 ("fb", "inst_c_fb"), ("emu", "inst_c_emu"), ("arq", "inst_c_arq"))
+
+    def _montar_instalador(self, aba, bg, panel, panel2, border, white, muted, accent, green):
+        self.inst_estado = {k: None for k, _ in self.INST_COMP}
+        self.inst_ocupado = False; self.inst_verificado = False
+        c = tk.Frame(aba, bg=panel, highlightthickness=1, highlightbackground=border, padx=20, pady=16)
+        c.pack(fill="x", padx=30, pady=(18, 10))
+        self.w_inst_titulo = tk.Label(c, text=self.t("inst_titulo"), bg=panel, fg=accent, font=("Segoe UI", 11, "bold")); self.w_inst_titulo.pack(anchor="w")
+        self.w_inst_desc = tk.Label(c, text=self.t("inst_desc"), bg=panel, fg=muted, font=("Segoe UI", 9), justify="left", wraplength=860)
+        self.w_inst_desc.pack(anchor="w", pady=(4, 10))
+        self.inst_nomes = {}; self.inst_vals = {}
+        for k, chave in self.INST_COMP:
+            linha = tk.Frame(c, bg=panel); linha.pack(fill="x", pady=3)
+            n = tk.Label(linha, text=self.t(chave), bg=panel, fg=white, font=("Segoe UI", 9)); n.pack(side="left")
+            v = tk.Label(linha, text="", bg=panel2, fg=muted, font=("Segoe UI", 9, "bold"), padx=10, pady=2); v.pack(side="right")
+            self.inst_nomes[k] = n; self.inst_vals[k] = v
+        self.inst_progresso = ttk.Progressbar(c, mode="indeterminate", style="TDB.Horizontal.TProgressbar"); self.inst_progresso.pack(fill="x", pady=(12, 8))
+        bot = tk.Frame(c, bg=panel); bot.pack(fill="x")
+        self.b_inst_check = tk.Button(bot, text=self.t("inst_b_check"), command=self.inst_verificar, bg="#26384D", fg=white, activebackground="#354B63",
+                                      activeforeground=white, relief="flat", bd=0, font=("Segoe UI", 10, "bold"), padx=16, pady=8, cursor="hand2")
+        self.b_inst_check.pack(side="left")
+        self.b_inst_install = tk.Button(bot, text=self.t("inst_b_install"), command=self.inst_instalar, bg=accent, fg="#10170A", activebackground="#C9FF8B",
+                                        activeforeground="#10170A", relief="flat", bd=0, font=("Segoe UI", 10, "bold"), padx=16, pady=8, cursor="hand2")
+        self.b_inst_install.pack(side="right")
+        self.w_inst_nota = tk.Label(aba, text=self.t("inst_nota"), bg=bg, fg="#E0A050", font=("Segoe UI", 9), justify="left", wraplength=900)
+        self.w_inst_nota.pack(anchor="w", padx=32, pady=(0, 8))
+        self.inst_txt = scrolledtext.ScrolledText(aba, bg="#0A1018", fg="#AFC2D8", insertbackground=white, font=("Cascadia Mono", 8), relief="flat", bd=0, height=8,
+                                                  padx=10, pady=8, wrap="word")
+        self.inst_txt.pack(fill="both", expand=True, padx=30, pady=(0, 22)); self.inst_txt.configure(state="disabled")
+        self._pintar_instalador()
+
+    def _pintar_instalador(self):
+        if not hasattr(self, "inst_vals"):
+            return
+        self.w_inst_titulo.configure(text=self.t("inst_titulo")); self.w_inst_desc.configure(text=self.t("inst_desc")); self.w_inst_nota.configure(text=self.t("inst_nota"))
+        self.b_inst_check.configure(text=self.t("inst_b_check")); self.b_inst_install.configure(text=self.t("inst_b_install"))
+        for k, chave in self.INST_COMP:
+            self.inst_nomes[k].configure(text=self.t(chave))
+            est = self.inst_estado.get(k)
+            texto = {None: self.t("inst_nv"), True: self.t("inst_ok"), False: self.t("inst_no")}[est]
+            cor = {None: "#91A2B8", True: "#A9E86A", False: "#FF8A7A"}[est]
+            self.inst_vals[k].configure(text=" " + texto + " ", fg=cor)
+
+    def _aba_mudou(self, _evento=None):
+        if self.nb.index("current") == 1 and not self.inst_verificado and not self.inst_ocupado:
+            self.inst_verificado = True; self.inst_verificar()
+
+    def _inst_log(self, t: str):
+        gravar_log(time.strftime("%H:%M:%S ") + "[instalador] " + t)
+        self.fila.put(("inst_log", time.strftime("%H:%M:%S ") + t))
+
+    def _inst_busy(self):
+        self.inst_ocupado = True; self.inst_progresso.start(12)
+        self.b_inst_check.configure(state="disabled"); self.b_inst_install.configure(state="disabled")
+
+    @staticmethod
+    def _java_versao() -> int:
+        try:
+            r = subprocess.run(["java", "-version"], capture_output=True, text=True, timeout=15, creationflags=SEM_JANELA)
+            m = re.search(r'version "(\d+)', (r.stderr or "") + (r.stdout or ""))
+            return int(m.group(1)) if m else 0
+        except Exception:
+            return 0
+
+    def _inst_checar(self) -> dict:
+        import shutil
+        py = python_console()
+        r = {"py": sys.version_info[:2] >= (3, 11), "node": bool(shutil.which("node")), "java": self._java_versao() >= 21,
+             "fb": bool(shutil.which("firebase") or shutil.which("firebase.cmd")), "frida": False}
+        try:
+            p = subprocess.run([py, "-I", "-c", "import frida, cryptography"], capture_output=True, text=True, timeout=60, creationflags=SEM_JANELA)
+            r["frida"] = p.returncode == 0
+        except Exception:
+            pass
+        home = Path(os.environ.get("USERPROFILE", str(Path.home())))
+        r["emu"] = (home / ".cache" / "firebase" / "emulators").exists()
+        r["arq"] = (RAIZ / "host" / "servidor_host.py").exists() and CLIENTE.exists()
+        return r
+
+    def inst_verificar(self):
+        if self.inst_ocupado:
+            return
+        self._inst_busy()
+
+        def t():
+            try:
+                self._inst_log(self.t("inst_l_verif"))
+                for k, v in self._inst_checar().items():
+                    self.fila.put(("inst_dep", (k, v)))
+                self._inst_log(self.t("inst_l_fim"))
+            except Exception as e:
+                self._inst_log("ERRO: %r" % e)
+            finally:
+                self.fila.put(("inst_fim", None))
+        threading.Thread(target=t, daemon=True, name="inst_verificar").start()
+
+    def inst_instalar(self):
+        if self.inst_ocupado:
+            return
+        if not messagebox.askyesno("TDB Launcher", self.t("inst_confirma"), parent=self.r):
+            return
+        self._inst_busy()
+
+        def cmd(args, cwd=None):
+            self._inst_log("$ " + " ".join(map(str, args)))
+            p = subprocess.Popen(args, cwd=str(cwd) if cwd else None, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                 errors="replace", bufsize=1, creationflags=SEM_JANELA)
+            for linha in p.stdout:
+                if linha.strip():
+                    self._inst_log(linha.rstrip())
+            if p.wait():
+                raise RuntimeError("o comando terminou com codigo %s: %s" % (p.returncode, args[0]))
+
+        def t():
+            import shutil
+            try:
+                py = python_console()
+                if not frida_instalado(py) or not self._inst_checar().get("frida"):
+                    cmd([py, "-I", "-m", "pip", "install", "frida", "frida-tools", "cryptography"])
+                if not shutil.which("node"):
+                    cmd(["winget", "install", "--id", "OpenJS.NodeJS.LTS", "-e", "--accept-package-agreements", "--accept-source-agreements"])
+                    self._inst_log(self.t("inst_l_reiniciar", c="Node.js")); return
+                if self._java_versao() < 21:
+                    cmd(["winget", "install", "--id", "EclipseAdoptium.Temurin.21.JDK", "-e", "--accept-package-agreements", "--accept-source-agreements"])
+                    self._inst_log(self.t("inst_l_reiniciar", c="Java 21")); return
+                npm = shutil.which("npm.cmd") or shutil.which("npm")
+                if not npm:
+                    self._inst_log(self.t("inst_l_reiniciar", c="Node.js")); return
+                fb = shutil.which("firebase.cmd") or shutil.which("firebase")
+                if not fb:
+                    cmd([npm, "install", "-g", "firebase-tools"])
+                    fb = shutil.which("firebase.cmd") or shutil.which("firebase") or str(Path(os.environ.get("APPDATA", "")) / "npm" / "firebase.cmd")
+                emu = RAIZ / "servicos" / "firestore_emu"; emu.mkdir(parents=True, exist_ok=True)
+                cmd([fb, "setup:emulators:firestore"], cwd=emu)
+                self._inst_log(self.t("inst_l_inst_ok"))
+            except Exception as e:
+                self._inst_log("ERRO: %r" % e); gravar_log(time.strftime("%H:%M:%S ") + "ERRO instalador: %r" % e)
+            finally:
+                self.fila.put(("inst_fim", None))
+                try:
+                    for k, v in self._inst_checar().items():
+                        self.fila.put(("inst_dep", (k, v)))
+                except Exception:
+                    pass
+        threading.Thread(target=t, daemon=True, name="inst_instalar").start()
 
     # ------------------------------------------------------------------ tela (modo e resolucao do jogo)
     def _montar_menus_tela(self):
@@ -452,6 +638,8 @@ class Launcher:
         self.b_escolher.configure(text=self.t("b_escolher"))
         self.chk_barras.configure(text=self.t("chk_barras"))
         self.b_diag.configure(text=self.t("b_diag"))
+        self.nb.tab(0, text=self.t("aba_jogar")); self.nb.tab(1, text=self.t("aba_inst"))
+        self._pintar_instalador()
         self.w_tela.configure(text=self.t("w_tela")); self.w_res.configure(text=self.t("w_res")); self._montar_menus_tela()
         self._mostrar_pasta()
         for tipo in ("estado", "servidor", "versao"):
@@ -490,6 +678,13 @@ class Launcher:
                     self._botoes(val)
                 elif tipo == "reiniciar":
                     self._reiniciar_launcher()
+                elif tipo == "inst_log":
+                    self.inst_txt.configure(state="normal"); self.inst_txt.insert("end", val + "\n"); self.inst_txt.see("end"); self.inst_txt.configure(state="disabled")
+                elif tipo == "inst_dep":
+                    self.inst_estado[val[0]] = val[1]; self._pintar_instalador()
+                elif tipo == "inst_fim":
+                    self.inst_progresso.stop(); self.inst_progresso.configure(value=0); self.inst_ocupado = False
+                    self.b_inst_check.configure(state="normal"); self.b_inst_install.configure(state="normal")
                 elif tipo == "info":
                     messagebox.showinfo("TDB Launcher", val, parent=self.r)
                 elif tipo == "aviso":

@@ -66,6 +66,9 @@ if "--sem-monitores" not in sys.argv:
 # resgate_queda.js (06/11): unstuck automatico (6 s caindo ou abaixo do mapa) e manual (linux/unstuck.sh). --sem-resgate desliga.
 if "--sem-resgate" not in sys.argv:
     SCRIPTS.append("resgate_queda.js")
+# sem_tick_widgets.js (12/11): desliga o tick dos 12,5 mil WidgetComponent (marcadores de loot) no host; eram 95% dos ticks ligados.
+if "--com-tick-widgets" not in sys.argv:
+    SCRIPTS.append("sem_tick_widgets.js")
 # 10/11: diagnostico de desempenho: TDB_SEM_SCRIPTS=a.js,b.js tira scripts da lista (bisseccao do atraso do host).
 for _x in [t for t in os.environ.get("TDB_SEM_SCRIPTS", "").split(",") if t]:
     if _x in SCRIPTS: SCRIPTS.remove(_x)
@@ -186,7 +189,7 @@ MARCOS = ("LISTEN OK", "reenviada a aparencia", "[qfix]", "ABORTADO", "ERRO", "D
           "LoginCompleted", "PHASE", "placeholder de cliente visto", "SurvivalPlayer_V2_C", "InitPlayer", "OnError", "erro",
           "SteamId", "Firestore", "ConnectEx IPv", "ITEM SUMIU", "TIRO EM ZUMBI LONGE", "[ping]", "alvos vigiados", "canal FECHADO",
           "TELEPORTE", "TROCOU PAWN", "SEM PAWN", "classe preservada", "RESGATE", "pedido manual", "[otim]",
-          "[dados]", "[timeout]", "[uid]", "[resgate]", "NAO redirecionado")   # 12/11: linhas uteis no launcher.log para diagnostico
+          "[dados]", "[timeout]", "[uid]", "[resgate]", "NAO redirecionado", "[wtick]")   # 12/11: linhas uteis no launcher.log para diagnostico
 
 # Identidade Steam (emulador Goldberg): host e cliente usam a mesma instalacao, e o emulador le o ID ao abrir o processo
 # (force_steamid.txt da pasta do Engine, onde esta o steam_api64.dll carregado; configs.user.ini gravado junto).

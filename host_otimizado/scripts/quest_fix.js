@@ -199,7 +199,9 @@ setInterval(function () {   // JS leve: 1x por segundo
     if (esperandoRes) { if (blk.add(8).readS32() === 1) { esperandoRes = false; blk.add(8).writeU64(0); consumir(); } return; }
     if (ocupadoAte) { if (agora >= ocupadoAte) { ocupadoAte = 0; querResultado = true; pedir(); } return; }
     if (fila.length || agora < proxima) return;
-    proxima = agora + 6000;
+    // 12/11: cada varredura custa ~54 ms na thread do jogo (1,1 milhao de objetos; medido com perf). Depois de preencher as zonas,
+    // so confere de novo a cada 5 min (antes: a cada 6 s para sempre = um engasgo de 54 ms a cada 6 s).
+    proxima = agora + (rodadas > 0 ? 300000 : 6000);
     if (idxZ < 0) idxZ = findFName('BP_QuestItemsSpawnZone_C');
     if (idxL < 0) idxL = findFName('LootPoint_C');
     if (idxZ < 0 || idxL < 0) return;    // o Blueprint ainda nao carregou

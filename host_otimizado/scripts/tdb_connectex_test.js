@@ -26,7 +26,12 @@ const EMU_PORT = 443; // terminador TLS (certs\tls_front.py) -> emulador 8081
 const SET_VERIFY = main.base.add(0x58ad710); // SSL_CTX_set_verify (fork1: chamado em FUN_1451fdba0)
 const LOCAL4 = [127, 0, 0, 1];
 const LOCAL6 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
-const GOOGLE4 = [[172, 217], [142, 250], [142, 251], [216, 58], [74, 125], [172, 253]];
+// 10/11: + faixas do Google (AS15169) usadas fora das Americas (ex.: Russia: 64.233, 173.194, 108.177, 209.85). Antes, uma
+// reconexao do Firestore para um IP fora da lista ia ao Google de verdade -> "Permission denied on resource project" -> o
+// progresso (tutorial etc.) deixava de ser salvo e o jogador voltava sempre para a sala do doutor.
+const GOOGLE4 = [[172, 217], [142, 250], [142, 251], [216, 58], [74, 125], [172, 253],
+                 [64, 233], [66, 102], [66, 249], [72, 14], [74, 114], [108, 170], [108, 177], [173, 194], [209, 85],
+                 [216, 239], [192, 178], [192, 179]];
 // Prefixos IPv6 do Google: 2800:3f0::/32, 2001:4860::/32, 2404:6800::/32, 2a00:1450::/32, 2607:f8b0::/32
 // (2607:f8b0 = America do Norte; sugerido no PR #1 do GitHub, onde o Firestore resolve para esse bloco)
 const GOOGLE6 = [[0x28, 0x00, 0x03, 0xf0], [0x20, 0x01, 0x48, 0x60], [0x24, 0x04, 0x68, 0x00], [0x2a, 0x00, 0x14, 0x50],
@@ -41,6 +46,7 @@ function isGoogle6(b) {
 
 // Teste 1: redirecionamento desde o startup (sem gate), para pegar o canal que o gRPC abre ja na inicializacao.
 let redirectOn = true;
+let naoRedir = 0;
 
 // Reescreve o sockaddr do destino se for Google:443. Retorna um texto para log, ou null.
 function redirectSockaddr(sa) {
@@ -49,7 +55,10 @@ function redirectSockaddr(sa) {
   if (port !== 443) return null;
   if (family === AF_INET) {
     const ip = [sa.add(4).readU8(), sa.add(5).readU8(), sa.add(6).readU8(), sa.add(7).readU8()];
-    if (!isGoogle4(ip)) return null;
+    if (!isGoogle4(ip)) {   // 10/11: registra o que sai para a 443 sem redirecionar (achar faixa nova do Google)
+      if (naoRedir < 20 && !(ip[0] === 127)) { naoRedir++; try { send({ tdb: '[cx] 443 NAO redirecionado: ' + ip.join('.') }); } catch (e) {} }
+      return null;
+    }
     for (let i = 0; i < 4; i++) sa.add(4 + i).writeU8(LOCAL4[i]);
     sa.add(2).writeU8((EMU_PORT >> 8) & 0xff);
     sa.add(3).writeU8(EMU_PORT & 0xff);

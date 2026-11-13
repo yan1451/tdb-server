@@ -43,6 +43,13 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;
 .barra{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
 .otim{font:12px ui-monospace,Consolas,monospace;color:var(--sub);word-break:break-word;margin-top:10px}
 .aviso-txt{color:var(--aviso);font-size:13px;margin-top:8px}
+.mapa-grade{display:grid;grid-template-columns:1fr 280px;gap:14px}@media (max-width:900px){.mapa-grade{grid-template-columns:1fr}}
+#cvMapa{width:100%;height:560px;border:1px solid var(--borda);border-radius:10px;background:var(--card);display:block;cursor:crosshair}
+.jlista .jl{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--borda)}.jlista .jl:last-child{border-bottom:0}
+.jlista .jn{font-weight:600;display:flex;align-items:center;gap:8px}.jlista .pt{width:11px;height:11px;border-radius:50%;display:inline-block}
+.jlista .js{color:var(--sub);font-size:12px}.jlista .jb{display:flex;gap:6px}.jlista .jb button{padding:5px 9px;font-size:12px}
+dialog{background:var(--card);color:var(--txt);border:1px solid var(--borda);border-radius:12px;padding:18px;min-width:340px}dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog .campo{display:flex;flex-direction:column;gap:6px;margin:10px 0}dialog label{color:var(--sub);font-size:13px}
 @media (max-width:640px){header{flex-wrap:wrap}nav{margin-left:0;width:100%;overflow-x:auto}main{padding:12px}}
 </style>
 </head>
@@ -52,6 +59,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;
   <nav>
     <button data-aba="controle" class="ativo">Controle</button>
     <button data-aba="jogadores">Jogadores</button>
+    <button data-aba="mapa">Mapa</button>
     <button data-aba="monitores">Monitores</button>
     <button data-aba="logs">Logs</button>
   </nav>
@@ -68,9 +76,10 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;
       <div class="botoes">
         <button class="b prim" id="btLigarVm">Ligar VM</button>
         <button class="b perigo" id="btDesalocar">Desalocar VM</button>
+        <button class="b" id="btBackup">Baixar saves</button>
         <button class="b" id="btAtualizar">Atualizar</button>
       </div>
-      <div class="aviso-txt">Ligada, a VM cobra CPU. Desalocar derruba o servidor e salva os personagens antes.</div>
+      <div class="aviso-txt">Ligada, a VM cobra CPU. Desalocar derruba o servidor, salva os personagens e baixa uma copia dos saves para a pasta backups_vps deste PC (tambem a cada 10 min enquanto a VM estiver ligada).</div>
     </section>
     <section class="card">
       <h2>Servidor do jogo</h2>
@@ -99,11 +108,42 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;
 <main id="jogadores">
   <section class="card">
     <h2>Jogadores conectados</h2>
-    <table><thead><tr><th>Jogador</th><th>Ping</th><th>Posicao (m)</th><th>Ultimo evento</th><th>Atualizado (UTC)</th></tr></thead>
+    <table><thead><tr><th>Personagem</th><th>PC</th><th>Vida</th><th>Ping</th><th>Posicao (m)</th><th>Acoes</th></tr></thead>
     <tbody id="tabJog"></tbody></table>
     <div class="aviso-txt" id="jogAviso"></div>
+    <div class="aviso-txt" id="msgAcao"></div>
   </section>
 </main>
+
+<main id="mapa">
+  <section class="card">
+    <h2>Mapa em tempo real</h2>
+    <div class="barra">
+      <label class="chk"><input type="checkbox" id="mpRastro" checked> rastro</label>
+      <label class="chk"><input type="checkbox" id="mpInvY"> inverter eixo Y</label>
+      <label class="chk">px por m <input type="text" id="mpEsc" size="4" value="1"></label>
+      <button class="b" id="mpCal">Calibrar com o selecionado</button>
+      <button class="b" id="mpCentrar">Mapa inteiro</button>
+      <span class="aviso-txt" id="mpStatus" style="margin:0"></span>
+    </div>
+    <div class="mapa-grade">
+      <canvas id="cvMapa" width="900" height="560"></canvas>
+      <div class="jlista" id="mpLista"></div>
+    </div>
+    <div class="aviso-txt" id="msgAcao2"></div>
+    <div class="otim">Mapa do GPS do proprio jogo (textura Map3008). Roda do mouse = zoom, arrastar = mover, clicar num jogador = selecionar. Como calibrar: selecione um jogador na lista, clique em "Calibrar com o selecionado" e depois clique no mapa onde ele esta de fato (compare com o mapa do jogo, tecla M). A escala inicial e de 1 pixel por metro; se outro jogador ficar espelhado ou fora do lugar, marque "inverter eixo Y" ou ajuste "px por m" e calibre de novo.</div>
+  </section>
+</main>
+
+<dialog id="dlgTele">
+  <h2 style="margin:0 0 6px;font-size:16px">Teleportar jogador</h2>
+  <div class="campo"><label>Quem</label><select id="teleAlvo"></select></div>
+  <div class="campo"><label><input type="radio" name="teleModo" value="para" checked> Para perto de</label><select id="telePara"></select></div>
+  <div class="campo"><label><input type="radio" name="teleModo" value="woodberry"> Para Woodberry (ponto padrao do lobby)</label></div>
+  <div class="campo"><label><input type="radio" name="teleModo" value="coord"> Para coordenadas (m)</label>
+    <div style="display:flex;gap:6px"><input type="text" id="teleX" placeholder="X" size="7"><input type="text" id="teleY" placeholder="Y" size="7"><input type="text" id="teleZ" placeholder="Z" size="7"></div></div>
+  <div class="botoes"><button class="b prim" id="teleEnviar">Teleportar</button><button class="b" id="teleCancelar">Cancelar</button></div>
+</dialog>
 
 <main id="monitores">
   <section class="card">
@@ -177,21 +217,9 @@ function render() {
   }
   $("selVersao").value = est.versao; $("chkEnviar").checked = !!est.enviar_scripts;
   const hostOn = v && v.host.rodando;
-  $("btLigarVm").disabled = ocupado || ligada; $("btDesalocar").disabled = ocupado || !ligada && !(vm.estado || "").includes("stopped");
+  $("btBackup").disabled = ocupado || !ligada; $("btLigarVm").disabled = ocupado || ligada; $("btDesalocar").disabled = ocupado || !ligada && !(vm.estado || "").includes("stopped");
   $("btSubir").disabled = ocupado || !ligada || hostOn; $("btDerrubar").disabled = ocupado || !ligada;
-  // jogadores
-  const jog = v ? v.jogadores || [] : [];
-  $("tabJog").innerHTML = "";
-  if (!jog.length) $("tabJog").innerHTML = '<tr><td colspan="5" class="vazio">' + (hostOn ? "Nenhum jogador conectado." : "Servidor fora do ar.") + "</td></tr>";
-  for (const j of jog) {
-    const tr = document.createElement("tr");
-    const cel = t => { const td = document.createElement("td"); td.textContent = t; tr.appendChild(td); };
-    cel(j.nome); cel(j.ping != null ? j.ping + " ms" : "-"); cel(j.pos ? j.pos.map(x => x.toFixed(0)).join(", ") : "-");
-    cel(j.marca || "-"); cel(j.pos_hora || (v && v.ping_hora) || "-");
-    $("tabJog").appendChild(tr);
-  }
-  const monPing = (est.monitores || []).find(m => m.id === "monitor_ping");
-  $("jogAviso").textContent = hostOn && v.monitores_rodando.indexOf("monitor_ping") < 0 ? "Ligue o monitor \"Ping dos jogadores\" para ver quem esta conectado." : "";
+  renderJogadores();
   // monitores
   const lista = $("listaMon"); lista.innerHTML = "";
   for (const m of est.monitores || []) {
@@ -257,6 +285,7 @@ $("btDerrubar").onclick = () => {
   const n = est && est.vps && est.vps.ok ? (est.vps.jogadores || []).length : 0;
   acao({ acao: "derrubar" }, (n ? "Ha " + n + " jogador(es) conectado(s)! " : "") + "Derrubar o servidor? Os personagens sao salvos antes.");
 };
+$("btBackup").onclick = () => acao({ acao: "backup" }, "Baixar agora uma copia dos saves da VPS para este PC?");
 $("btAtualizar").onclick = () => atualizar(true);
 
 async function carregarLog() {
@@ -269,6 +298,180 @@ async function carregarLog() {
 $("btLog").onclick = carregarLog;
 $("logFiltro").onkeydown = e => { if (e.key === "Enter") carregarLog(); };
 setInterval(() => { if ($("logAuto").checked && $("logs").classList.contains("ativo")) carregarLog(); }, 5000);
+
+// ---------------------------------------------------------------- jogadores e mapa em tempo real (Ponte do painel no host)
+let ROS = { dados: null, idade: null, pontos: [], mapa: {} }, hist = {}, selecionado = null, imgMapa = null, vista = null;
+const CORES = ["#2f6fed", "#e5484d", "#30a46c", "#f5a524", "#8e4ec6", "#12a594", "#d6409f", "#7a7f8c"];
+function msgAcao(t) { ["msgAcao", "msgAcao2"].forEach(id => { if ($(id)) $(id).textContent = t; }); }
+function jogadoresAtuais() {
+  const d = ROS.dados;
+  if (d && ROS.idade != null && ROS.idade < 8) return { fonte: "ponte", lista: d.jogadores || [] };
+  const v = est && est.vps && est.vps.ok ? est.vps : null;
+  return { fonte: "monitor", lista: ((v && v.jogadores) || []).map(j => ({ login: "", pc: j.nome, ping: j.ping, x: null, y: null, z: null, vida: null })) };
+}
+function corDe(j) { const l = jogadoresAtuais().lista; const i = Math.max(0, l.findIndex(k => (k.login || k.pc) === (j.login || j.pc))); return CORES[i % CORES.length]; }
+function botoesJogador(j, destino) {
+  const id = j.login || j.pc;
+  const b1 = document.createElement("button"); b1.className = "b"; b1.textContent = "Teleportar"; b1.onclick = () => abrirTele(id);
+  const b2 = document.createElement("button"); b2.className = "b"; b2.textContent = "Dar dinheiro"; b2.onclick = () => darDinheiro(id);
+  destino.appendChild(b1); destino.appendChild(document.createTextNode(" ")); destino.appendChild(b2);
+}
+function renderJogadores() {
+  const tb = $("tabJog"); if (!tb) return; tb.innerHTML = "";
+  const v = est && est.vps && est.vps.ok ? est.vps : null, hostOn = v && v.host.rodando;
+  const { fonte, lista } = jogadoresAtuais();
+  if (!lista.length) tb.innerHTML = '<tr><td colspan="6" class="vazio">' + (hostOn ? "Nenhum jogador conectado." : "Servidor fora do ar.") + "</td></tr>";
+  for (const j of lista) {
+    const tr = document.createElement("tr");
+    const cel = t => { const td = document.createElement("td"); td.textContent = t; tr.appendChild(td); return td; };
+    cel(j.login || "-"); cel(j.pc || "-"); cel(j.vida != null ? (j.morto ? "morto" : j.vida + "%") : "-"); cel(j.ping != null ? j.ping + " ms" : "-");
+    cel(j.x != null ? [j.x, j.y, j.z].map(n => Math.round(n)).join(", ") : "-");
+    const ac = document.createElement("td");
+    if (fonte === "ponte") botoesJogador(j, ac); else ac.textContent = "ligue a Ponte do painel";
+    tr.appendChild(ac); tb.appendChild(tr);
+  }
+  $("jogAviso").textContent = hostOn && fonte !== "ponte" ? 'Ligue o monitor "Ponte do painel" (aba Monitores) para ver personagem, vida, mapa e usar teleporte e dinheiro.' : "";
+  const ml = $("mpLista"); if (ml) {
+    ml.innerHTML = "";
+    for (const j of lista) {
+      const d = document.createElement("div"); d.className = "jl";
+      const n = document.createElement("div"); n.className = "jn";
+      const pt = document.createElement("span"); pt.className = "pt"; pt.style.background = corDe(j);
+      n.appendChild(pt); n.appendChild(document.createTextNode(j.login || j.pc || "?")); n.style.cursor = "pointer"; n.onclick = () => { selecionado = j.login || j.pc; desenharMapa(); };
+      const s = document.createElement("div"); s.className = "js";
+      s.textContent = (j.pc ? j.pc + " · " : "") + (j.vida != null ? (j.morto ? "morto" : j.vida + "% vida") : "") + (j.ping != null ? " · " + j.ping + " ms" : "") + (j.x != null ? " · (" + Math.round(j.x) + ", " + Math.round(j.y) + ")" : "");
+      const b = document.createElement("div"); b.className = "jb"; if (fonte === "ponte") botoesJogador(j, b);
+      d.appendChild(n); d.appendChild(s); d.appendChild(b); ml.appendChild(d);
+    }
+  }
+}
+function abrirTele(id) {
+  const l = jogadoresAtuais().lista; if (!l.length) return;
+  const nomes = l.map(j => j.login || j.pc);
+  $("teleAlvo").innerHTML = ""; $("telePara").innerHTML = "";
+  ["todos"].concat(nomes).forEach(n => { const o = document.createElement("option"); o.value = n; o.textContent = n === "todos" ? "(todos os jogadores)" : n; $("teleAlvo").appendChild(o); });
+  nomes.forEach(n => { const o = document.createElement("option"); o.value = n; o.textContent = n; $("telePara").appendChild(o); });
+  $("teleAlvo").value = id;
+  const outro = nomes.find(n => n !== id); if (outro) $("telePara").value = outro;
+  $("dlgTele").showModal();
+}
+$("teleCancelar").onclick = () => $("dlgTele").close();
+$("teleEnviar").onclick = () => {
+  const alvo = $("teleAlvo").value, modo = document.querySelector('input[name="teleModo"]:checked').value;
+  const corpo = { acao: "teleportar", alvo };
+  if (modo === "para") { corpo.para = $("telePara").value; if (corpo.para === alvo) return alert("Escolha outro jogador como destino."); }
+  else if (modo === "woodberry") corpo.destino = "woodberry";
+  else {
+    corpo.x = parseFloat($("teleX").value.replace(",", ".")); corpo.y = parseFloat($("teleY").value.replace(",", ".")); corpo.z = parseFloat($("teleZ").value.replace(",", "."));
+    if (![corpo.x, corpo.y, corpo.z].every(isFinite)) return alert("Coordenadas invalidas (use numeros em metros).");
+  }
+  $("dlgTele").close(); enviarComando(corpo, "Teleportar " + alvo);
+};
+function darDinheiro(id) {
+  const v = prompt("Quanto dinheiro (Trade_Money) para " + id + "? (1 a 1.000.000)\n\nAviso: chega ao cliente na hora, mas pode nao ficar salvo se o jogador sair sem o jogo gravar o inventario.", "10000");
+  if (!v) return; const n = parseInt(v.replace(/\D/g, ""), 10);
+  if (!(n >= 1 && n <= 1000000)) return alert("Valor invalido.");
+  enviarComando({ acao: "dinheiro", alvo: id, valor: n }, "Dinheiro para " + id);
+}
+async function enviarComando(corpo, titulo) {
+  msgAcao(titulo + ": enviando...");
+  const r = await api("/api/acao", corpo);
+  if (!r.ok) { msgAcao(titulo + ": " + (r.msg || r.erro || "falhou")); return; }
+  for (let i = 0; i < 40; i++) {
+    await new Promise(s => setTimeout(s, 700));
+    const t = await api("/api/tarefa?desde=0");
+    if (!t.ativa) { msgAcao(titulo + ": " + (t.ok ? "OK" : "FALHOU") + " - " + (t.linhas || []).slice(-1).join(" ")); return; }
+  }
+}
+function acumular() {
+  if (!ROS.dados) return;
+  for (const j of ROS.dados.jogadores || []) {
+    const k = j.login || j.pc; const a = hist[k] = hist[k] || []; const u = a[a.length - 1];
+    if (!u || Math.hypot(u.x - j.x, u.y - j.y) > 2) { a.push({ x: j.x, y: j.y }); if (a.length > 200) a.shift(); }
+  }
+}
+const IMG_W = 4096, IMG_H = 4424;   // textura Map3008 do jogo (BGRA 4096x4424)
+let calibrando = false, arrasto = null, vistaPx = null, TRF = null;
+function calAtual() {
+  const m = ROS.mapa && ROS.mapa.ref ? ROS.mapa : null;
+  return { esc: m ? (m.esc || 1) : 1, inv: m ? !!m.inv : false, ref: m ? m.ref : { wx: 1664, wy: -2880, px: IMG_W / 2, py: IMG_H / 2 }, calibrado: !!m };
+}
+function mundoPx(X, Y, c) { return { x: c.ref.px + c.esc * (X - c.ref.wx), y: c.ref.py + (c.inv ? -1 : 1) * c.esc * (Y - c.ref.wy) }; }
+function selecionadoJ() { const l = jogadoresAtuais().lista; return l.find(j => (j.login || j.pc) === selecionado && j.x != null); }
+function salvarCal(ref) {
+  const c = calAtual(); const esc = parseFloat(($("mpEsc").value || "1").replace(",", ".")) || 1;
+  return api("/api/acao", { acao: "mapa_cfg", esc: esc, inv: $("mpInvY").checked, ref: ref || c.ref }).then(r => { if (r.erro || r.ok === false) msgAcao("calibracao: " + (r.erro || r.msg)); });
+}
+function desenharMapa() {
+  const cv = $("cvMapa"); if (!cv || !$("mapa").classList.contains("ativo")) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 900, H = 560;
+  if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const css = getComputedStyle(document.documentElement), cBorda = css.getPropertyValue("--borda").trim(), cSub = css.getPropertyValue("--sub").trim(), cTxt = css.getPropertyValue("--txt").trim();
+  const cal = calAtual(), { lista } = jogadoresAtuais(), pontos = ROS.pontos || [];
+  const v = vistaPx || { x0: 0, y0: 0, x1: IMG_W, y1: IMG_H };
+  const esc = Math.min(W / (v.x1 - v.x0), H / (v.y1 - v.y0)), ox = (W - (v.x1 - v.x0) * esc) / 2, oy = (H - (v.y1 - v.y0) * esc) / 2;
+  TRF = { ox: ox, oy: oy, esc: esc, v: v, cal: cal };
+  const SX = p => ox + (p - v.x0) * esc, SY = p => oy + (p - v.y0) * esc;
+  c.clearRect(0, 0, W, H);
+  if (!imgMapa) { imgMapa = new Image(); imgMapa.onload = desenharMapa; imgMapa.onerror = () => { imgMapa.falhou = true; desenharMapa(); }; imgMapa.src = "/mapa.png"; }
+  if (imgMapa.complete && imgMapa.naturalWidth) c.drawImage(imgMapa, SX(0), SY(0), IMG_W * esc, IMG_H * esc);
+  else { c.fillStyle = cSub; c.font = "13px system-ui"; c.fillText(imgMapa.falhou ? "mapa.png nao encontrado na pasta do painel" : "carregando o mapa...", 14, 24); }
+  // escala (barra de 500 m)
+  const barra = 500 * cal.esc * esc; c.strokeStyle = "#fff"; c.lineWidth = 3; c.beginPath(); c.moveTo(14, H - 16); c.lineTo(14 + barra, H - 16); c.stroke();
+  c.fillStyle = "#fff"; c.font = "11px system-ui"; c.fillText("500 m", 14, H - 22);
+  c.font = "12px system-ui";
+  for (const p of pontos) { const q = mundoPx(p.x, p.y, cal), x = SX(q.x), y = SY(q.y); c.fillStyle = "#ffd166"; c.beginPath(); c.moveTo(x, y - 6); c.lineTo(x + 6, y); c.lineTo(x, y + 6); c.lineTo(x - 6, y); c.closePath(); c.fill(); c.fillStyle = "#fff"; c.fillText(p.nome, x + 9, y + 4); }
+  const rastro = $("mpRastro").checked;
+  for (const j of lista) {
+    if (j.x == null) continue; const k = j.login || j.pc, cor = corDe(j);
+    if (rastro && hist[k] && hist[k].length > 1) { c.strokeStyle = cor; c.globalAlpha = 0.7; c.lineWidth = 2.5; c.beginPath(); hist[k].forEach((q, i) => { const m = mundoPx(q.x, q.y, cal); i ? c.lineTo(SX(m.x), SY(m.y)) : c.moveTo(SX(m.x), SY(m.y)); }); c.stroke(); c.globalAlpha = 1; }
+  }
+  for (const j of lista) {
+    if (j.x == null) continue; const k = j.login || j.pc, cor = corDe(j), m = mundoPx(j.x, j.y, cal), x = SX(m.x), y = SY(m.y), sel = selecionado === k;
+    if (j.morto) { c.strokeStyle = "#fff"; c.lineWidth = 3; c.beginPath(); c.moveTo(x - 6, y - 6); c.lineTo(x + 6, y + 6); c.moveTo(x + 6, y - 6); c.lineTo(x - 6, y + 6); c.stroke(); }
+    else { c.fillStyle = cor; c.beginPath(); c.arc(x, y, sel ? 9 : 7, 0, 7); c.fill(); c.lineWidth = 2; c.strokeStyle = sel ? "#fff" : "#000"; c.stroke(); }
+    c.font = "bold 12px system-ui"; const t = (j.login || j.pc || "?") + (j.vida != null && !j.morto ? " " + j.vida + "%" : ""); c.lineWidth = 3; c.strokeStyle = "#000"; c.strokeText(t, x + 11, y - 9); c.fillStyle = "#fff"; c.fillText(t, x + 11, y - 9);
+  }
+  const idade = ROS.idade;
+  $("mpStatus").textContent = (calibrando ? "CLIQUE no mapa onde " + selecionado + " esta · " : "") + (!cal.calibrado ? "nao calibrado (posicao aproximada) · " : "") +
+    (!ROS.dados ? "aguardando a Ponte do painel (ligue o monitor 'Ponte do painel')" : idade != null && idade > 8 ? "sem atualizacao ha " + idade + " s (ponte parada ou VM/host fora)" : lista.length + " jogador(es) · atualizado agora");
+}
+function eventoPx(e) { const r = $("cvMapa").getBoundingClientRect(), t = TRF; if (!t) return null; const sx = (e.clientX - r.left), sy = (e.clientY - r.top); return { x: t.v.x0 + (sx - t.ox) / t.esc, y: t.v.y0 + (sy - t.oy) / t.esc, sx: sx, sy: sy }; }
+$("mpCentrar").onclick = () => { vistaPx = null; desenharMapa(); };
+$("mpInvY").onchange = () => { salvarCal(); desenharMapa(); }; $("mpRastro").onchange = () => desenharMapa(); $("mpEsc").onchange = () => { salvarCal(); desenharMapa(); };
+$("mpCal").onclick = () => {
+  const j = selecionadoJ(); if (!j) return alert("Selecione um jogador (clique no nome dele na lista ou no ponto no mapa) e ele precisa estar online.");
+  calibrando = true; msgAcao("Calibrando com " + selecionado + ": clique no mapa no ponto onde ele esta de fato."); desenharMapa();
+};
+$("cvMapa").addEventListener("wheel", e => {
+  e.preventDefault(); const p = eventoPx(e); if (!p) return; const v = vistaPx || { x0: 0, y0: 0, x1: IMG_W, y1: IMG_H }, k = e.deltaY < 0 ? 0.8 : 1.25;
+  const nx0 = p.x - (p.x - v.x0) * k, nx1 = p.x + (v.x1 - p.x) * k, ny0 = p.y - (p.y - v.y0) * k, ny1 = p.y + (v.y1 - p.y) * k;
+  if (nx1 - nx0 > IMG_W * 1.5 || nx1 - nx0 < 120) return; vistaPx = { x0: nx0, y0: ny0, x1: nx1, y1: ny1 }; desenharMapa();
+}, { passive: false });
+$("cvMapa").addEventListener("mousedown", e => { const p = eventoPx(e); if (p) arrasto = { sx: e.clientX, sy: e.clientY, v: Object.assign({}, vistaPx || { x0: 0, y0: 0, x1: IMG_W, y1: IMG_H }), mov: false }; });
+window.addEventListener("mousemove", e => {
+  if (!arrasto || !TRF) return; const dx = e.clientX - arrasto.sx, dy = e.clientY - arrasto.sy; if (Math.abs(dx) + Math.abs(dy) > 4) arrasto.mov = true; if (!arrasto.mov) return;
+  const k = TRF.esc; vistaPx = { x0: arrasto.v.x0 - dx / k, x1: arrasto.v.x1 - dx / k, y0: arrasto.v.y0 - dy / k, y1: arrasto.v.y1 - dy / k }; desenharMapa();
+});
+window.addEventListener("mouseup", e => {
+  const a = arrasto; arrasto = null; if (!a || a.mov || e.target !== $("cvMapa")) return; const p = eventoPx(e); if (!p) return;
+  if (calibrando) {
+    const j = selecionadoJ(); calibrando = false; if (!j) return;
+    salvarCal({ wx: j.x, wy: j.y, px: p.x, py: p.y }).then(() => { msgAcao("Mapa calibrado com " + selecionado + "."); atualizarRoster(); }); return;
+  }
+  const cal = calAtual(); let melhor = null, d0 = 16;
+  for (const j of jogadoresAtuais().lista) { if (j.x == null) continue; const m = mundoPx(j.x, j.y, cal), x = TRF.ox + (m.x - TRF.v.x0) * TRF.esc, y = TRF.oy + (m.y - TRF.v.y0) * TRF.esc, d = Math.hypot(x - p.sx, y - p.sy); if (d < d0) { d0 = d; melhor = j; } }
+  if (melhor) { selecionado = melhor.login || melhor.pc; renderJogadores(); desenharMapa(); }
+});
+async function atualizarRoster() {
+  const ab = document.querySelector("nav button.ativo"), a = ab && ab.dataset.aba;
+  if (a !== "jogadores" && a !== "mapa") return;
+  try { const r = await api("/api/mapa"); ROS = r; acumular(); renderJogadores(); if (a === "mapa") desenharMapa(); } catch (e) {}
+}
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => setTimeout(atualizarRoster, 50)));
+setInterval(atualizarRoster, 1500);
+window.addEventListener("resize", desenharMapa);
 
 atualizar(true); acompanharTarefa();
 setInterval(() => atualizar(false), 10000);

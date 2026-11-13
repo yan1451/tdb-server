@@ -31,7 +31,7 @@ const VARS = ['PRONTO', 'DRV', 'WORLD', 'OFFACT', 'GOBJ', 'QPF', 'DEADMASK', 'VI
   'CAD_EXTRAS', 'CAD_REPL', 'CAD_FILHOS', 'PAUSA', 'LOTE_VARR', 'LOTE_DIST', 'MAXPERTO', 'GRACA_MS',
   'FRAME', 'NOW', 'NCAND', 'NEXTRA', 'NCANDNOVO', 'NEXTRANOVO', 'IDIST', 'NPEND',
   'SC_ATIVO', 'SC_NIVEL', 'SC_IDX', 'SC_TOTAL', 'SC_T0', 'SC_FIM', 'SC_FEITAS', 'TABN', 'TABTOMB', 'PASSO',
-  'NACORD', 'MAXNOVOS', 'DORM_MS'];
+  'NACORD', 'MAXNOVOS', 'DORM_MS', 'VAZIO_MS', 'VAZIO_ESPERA_MS', 'VAZIO_DESDE', 'SLEEPFN', 'VAZIO_QUADROS'];
 const STATS = ['QUADROS', 'TEMPO', 'TEMPO_MAX', 'REPL', 'PULADOS', 'CANAIS', 'FECHADOS', 'DESPEJOS', 'SEMNIVEL', 'ERRO_CRIAR',
   'TAB_CHEIA', 'PEND_CHEIA', 'SCAN_TOTAL', 'SCAN_TICKS', 'REPL_ESS', 'REPL_EXTRA', 'REPL_DONO', 'REPL_DIST',
   'ACORDADOS', 'DORM_POUPADOS', 'NOVOS_ADIADOS', 'ACORD_CHEIA'];
@@ -637,6 +637,16 @@ void onEnter (GumInvocationContext * ic)
   dt = t1 - t0;
   st[S_QUADROS]++; st[S_TEMPO] += dt;
   if (dt > st[S_TEMPO_MAX]) st[S_TEMPO_MAX] = dt;
+  /* freio com o host vazio (12/11): sem NENHUMA conexao (nem em handshake) ha VAZIO_ESPERA_MS, dorme VAZIO_MS por quadro.
+     Com qualquer conexao o quadro volta ao ritmo normal na hora. VAZIO_MS=0 desliga. */
+  if (v[V_VAZIO_MS] > 0 && v[V_SLEEPFN]) {
+    if (*(int *) ((char *) v[V_DRV] + 0xa8) > 0) v[V_VAZIO_DESDE] = 0;
+    else if (v[V_VAZIO_DESDE] == 0) v[V_VAZIO_DESDE] = t1;
+    else if (t1 - v[V_VAZIO_DESDE] >= v[V_QPF] * v[V_VAZIO_ESPERA_MS] / 1000) {
+      v[V_VAZIO_QUADROS]++;
+      ((void (*) (unsigned int)) v[V_SLEEPFN]) ((unsigned int) v[V_VAZIO_MS]);
+    }
+  }
 }
 
 /* para o teste fora do jogo: funcoes isoladas */
@@ -787,6 +797,11 @@ try {
 globalThis.__tdbReplOtim = { cm, mem, evento, classificar, qpfBuf };
 configurar(mem, QPF);
 vset('GOBJ', B.add(RVA.gObjects));
+// freio com o host vazio: so no jogo (o teste fora do jogo nao passa por aqui). `var OTIM_VAZIO_MS = 0;` desliga.
+vset('SLEEPFN', k32.getExportByName('Sleep'));
+vset('VAZIO_MS', (typeof OTIM_VAZIO_MS !== 'undefined') ? OTIM_VAZIO_MS : 180);                    // ~5 quadros/s
+vset('VAZIO_ESPERA_MS', (typeof OTIM_VAZIO_ESPERA_S !== 'undefined') ? OTIM_VAZIO_ESPERA_S * 1000 : 600000);   // 10 min sem ninguem
+log('[otim] freio com host vazio: ' + rd(mem.v, V.VAZIO_MS) + ' ms por quadro depois de ' + (rd(mem.v, V.VAZIO_ESPERA_MS) / 1000) + ' s sem conexoes');
 Interceptor.attach(B.add(RVA.tickFlush), cm);   // onEnter nativo; nao faz nada ate PRONTO=1
 
 // ---- dormencia: o jogo "acorda" atores dormentes (baus de loot ao abrir/fechar/mexer) com AActor::FlushNetDormancy; ForceNetUpdate

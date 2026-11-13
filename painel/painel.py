@@ -16,7 +16,8 @@ CFG = os.path.join(AQUI, "config.json")
 PADRAO = {"grupo": "SEU_GRUPO_DE_RECURSOS", "vm": "SUA_VM", "ip": "", "usuario": "azureuser",
           "chave": os.path.join(os.path.expanduser("~"), ".ssh", "chave_da_vm.pem"), "porta": 8765,
           "pasta_remota": "~/tdb/servidor", "versao": "host_otimizado", "enviar_scripts": True,
-          "monitores_ligados": ["monitor_ping", "monitor_posicao", "resgate_queda", "monitor_bugs"]}
+          "monitores_ligados": ["monitor_ping", "monitor_posicao", "resgate_queda", "painel_ponte"],
+          "backup_a_cada_min": 10}   # copia dos saves da VPS para este PC enquanto a VM estiver ligada (0 desliga)
 MONITORES = [
     {"id": "monitor_ping", "caminho": "host/scripts/monitor_ping.js", "nome": "Ping dos jogadores",
      "desc": "Ping de cada jogador a cada 15 s. Alimenta a aba Jogadores.", "escreve": False},
@@ -28,6 +29,8 @@ MONITORES = [
      "desc": "Itens sumindo do inventario/bau e tiro em zumbi fantasma.", "escreve": False},
     {"id": "monitor_loot_tiro", "caminho": "host/ferramentas/monitor_loot_tiro.js", "nome": "Loot e tiro (teste)",
      "desc": "Abrir/pegar loot, canais dos baus e tiros entre jogadores. Para o teste com 2 pessoas.", "escreve": False},
+    {"id": "painel_ponte", "caminho": "host/scripts/painel_ponte.js", "nome": "Ponte do painel (mapa, teleporte, dinheiro)",
+     "desc": "Grava personagem, posicao e vida de cada jogador a cada 1 s (mapa e tabela) e executa o teleporte e o dinheiro pedidos aqui. So ALTERA o jogo quando voce pede.", "escreve": True},
 ]
 POR_ID = {m["id"]: m for m in MONITORES}
 TOKEN = secrets.token_urlsafe(24)
@@ -277,9 +280,78 @@ def t_ligar(log):
     return esperar_ssh(log)
 
 
+# ------------------------------------------------------------------ backup dos saves para este PC
+PASTA_BACKUP = os.path.join(RAIZ, "backups_vps")
+
+
+def baixar_saves(log, motivo="manual"):
+    """Baixa para este PC (backups_vps\AAAAMMDD_HHMMSS_<motivo>.tar.gz) o banco do Firestore (emu_data = ultimo export, e emu_data_anterior), os instantaneos de
+    jogadores do backup_players.py (ultimos 60 + alertas.log), os relatorios de queda e a tabela de recursos. Roda sem derrubar nada; apos o 'derrubar'
+    o emu_data e o export FINAL (todos os personagens salvos). Devolve True se o arquivo baixou e contem o banco."""
+    import tarfile
+    os.makedirs(PASTA_BACKUP, exist_ok=True)
+    destino = os.path.join(PASTA_BACKUP, "%s_%s.tar.gz" % (time.strftime("%Y%m%d_%H%M%S"), motivo))
+    remoto = ("cd %s && tar czf - --ignore-failed-read servicos/firestore_emu/emu_data servicos/firestore_emu/emu_data_anterior "
+              "$(ls -t backups/players/*.json 2>/dev/null | head -60) backups/players/alertas.log logs/queda_*.txt logs/vigia_recursos.csv 2>/dev/null" % cfg["pasta_remota"])
+    log("baixando os saves da VPS para %s ..." % destino)
+    try:
+        for tentativa in (1, 2):
+            with open(destino, "wb") as f:
+                # stdin=DEVNULL: o ssh do Windows, com o console do painel como entrada, nao termina (visto: download travado 5 min); stderr sem pipe para nao encher
+                p = subprocess.Popen(ssh_base(15) + [remoto], stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                try: p.wait(timeout=120)
+                except subprocess.TimeoutExpired:
+                    p.kill(); log("AVISO: o download dos saves passou de 2 min (tentativa %d) e foi cancelado" % tentativa); continue
+            try:
+                with tarfile.open(destino) as t: nomes = t.getnames()
+                break
+            except Exception as e:
+                log("AVISO: arquivo incompleto na tentativa %d: %r" % (tentativa, e))
+        else:
+            raise RuntimeError("o download nao completou nas 2 tentativas")
+        with tarfile.open(destino) as t: nomes = t.getnames()
+    except Exception as e:
+        log("AVISO: backup dos saves FALHOU: %r" % e)
+        try: os.remove(destino)
+        except OSError: pass
+        return False
+    tem_banco = any(n.endswith("output-0") for n in nomes)
+    log("backup %s: %d arquivos, %.0f KB, %s" % ("OK" if tem_banco else "INCOMPLETO (sem o banco)", len(nomes), os.path.getsize(destino) / 1024.0, os.path.basename(destino)))
+    # retencao: 48 automaticos (~24 h) e 60 dos demais (manual/derrubar)
+    for sufixo, manter in (("_auto.tar.gz", 48), ("_manual.tar.gz", 60), ("_derrubar.tar.gz", 60)):
+        arqs = sorted(x for x in os.listdir(PASTA_BACKUP) if x.endswith(sufixo))
+        for x in arqs[:-manter]:
+            try: os.remove(os.path.join(PASTA_BACKUP, x))
+            except OSError: pass
+    return tem_banco
+
+
+def t_backup(log):
+    return baixar_saves(log, "manual")
+
+
+_ULT_AUTO = {"t": time.time()}
+
+
+def auto_backup():
+    """A cada 'backup_a_cada_min' (padrao 10) baixa os saves, se a VM estiver ligada e nao houver outra tarefa. Silencioso (so imprime no console)."""
+    while True:
+        time.sleep(60)
+        try:
+            cada = int(cfg.get("backup_a_cada_min", 10) or 0)
+            if cada <= 0 or time.time() - _ULT_AUTO["t"] < cada * 60 or TAREFA["ativa"]: continue
+            if estado_vm().get("estado") != "VM running": continue
+            _ULT_AUTO["t"] = time.time()
+            baixar_saves(lambda t: print(time.strftime("%H:%M:%S "), "[backup auto]", t, flush=True), "auto")
+        except Exception as e:
+            print("[backup auto] erro:", repr(e), flush=True)
+
+
 def t_derrubar(log):
     log("derrubando o servidor (host + export final do Firestore + servicos)...")
     cod, out = ssh("cd %s && bash linux/derrubar_tudo.sh" % cfg["pasta_remota"], timeout=300, linha=log)
+    try: baixar_saves(log, "derrubar")   # copia do export FINAL para este PC (nao impede o desligamento se falhar)
+    except Exception as e: log("AVISO: backup dos saves falhou: %r" % e)
     return cod == 0
 
 
@@ -312,7 +384,7 @@ def enviar_scripts(log):
 def ligar_monitor(log, mid):
     m = POR_ID[mid]
     log("ligando monitor %s..." % mid)
-    cod, out = ssh("cd %s && bash linux/carregar_ferramenta.sh %s 72" % (cfg["pasta_remota"], m["caminho"]), timeout=60, linha=log)
+    cod, out = ssh("mkdir -p %s; cd %s && bash linux/carregar_ferramenta.sh %s 72" % (CMD_DIR, cfg["pasta_remota"], m["caminho"]), timeout=60, linha=log)
     return cod == 0
 
 
@@ -350,6 +422,55 @@ def t_monitor(mid, ligar):
     return f
 
 
+PONTOS_PADRAO = [{"nome": "Woodberry (lobby)", "x": -971.5, "y": -42.4}, {"nome": "New City", "x": 1690, "y": -2035}]
+# ------------------------------------------------------------------ mapa em tempo real, teleporte e dinheiro (painel_ponte.js no host)
+CMD_DIR = '"$HOME/.wine-tdb/drive_c/users/$USER/AppData/Local/Temp/tdb_host_cmd"'
+ROSTER = {"dados": None, "t": 0.0, "ativo_ate": 0.0}
+
+
+def _roster_loop():
+    """Mantem UMA conexao SSH aberta lendo jogadores.json a cada 1 s (sem reconectar a cada leitura); so enquanto alguem olha o mapa/tabela (ultimos 45 s)."""
+    while True:
+        if time.time() > ROSTER["ativo_ate"]:
+            time.sleep(1); continue
+        p = None
+        try:
+            remoto = 'f=%s/jogadores.json; while true; do tr -d "\\n" < "$f" 2>/dev/null; echo; sleep 1; done' % CMD_DIR
+            p = subprocess.Popen(ssh_base(10) + [remoto], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            for lin in p.stdout:
+                if time.time() > ROSTER["ativo_ate"]: break
+                try:
+                    ROSTER["dados"] = json.loads(lin.decode("utf-8", "replace")); ROSTER["t"] = time.time()
+                except Exception: pass
+        except Exception: pass
+        finally:
+            try:
+                if p: p.kill()
+            except Exception: pass
+        time.sleep(2)
+
+
+def t_comando(cmd):
+    """Escreve comando.json na VPS (a ponte executa cada id novo, uma vez, na thread do jogo) e espera resultado.json com o mesmo id."""
+    def f(log):
+        cid = int(time.time() * 1000)
+        c = dict(cmd); c["id"] = cid
+        cod, out = ssh('d=%s; test -n "$(find "$d/jogadores.json" -mmin -1 2>/dev/null)" && echo PONTE_OK || echo PONTE_PARADA' % CMD_DIR, timeout=30)
+        if "PONTE_OK" not in out:
+            log("A ponte do painel nao esta ativa no host: ligue o monitor 'Ponte do painel (mapa, teleporte, dinheiro)' na aba Monitores."); return False
+        script = 'd=%s; mkdir -p "$d"; cat > "$d/comando.json" <<' % CMD_DIR + "'JSON'\n" + json.dumps(c, ensure_ascii=False) + "\nJSON\n"
+        script += 'for i in $(seq 1 16); do grep -q "\\"id\\": *%d" "$d/resultado.json" 2>/dev/null && { cat "$d/resultado.json"; exit 0; }; sleep 0.7; done; echo SEM_RESULTADO\n' % cid
+        log("enviando comando: " + json.dumps(cmd, ensure_ascii=False))
+        cod, out = ssh(script, timeout=40)
+        try:
+            r = json.loads(out.strip().splitlines()[-1])
+            log(("OK: " if r.get("ok") else "FALHOU: ") + str(r.get("msg")))
+            return bool(r.get("ok"))
+        except Exception:
+            log("o host nao respondeu ao comando em ~11 s (ponte parada ou host ocupado)"); return False
+    return f
+
+
 # ------------------------------------------------------------------ HTTP
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -369,10 +490,20 @@ class H(BaseHTTPRequestHandler):
             b = html.encode("utf-8")
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(b)))
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(b); return
+        if u.path == "/mapa.png":
+            arq = os.path.join(AQUI, "mapa.png")
+            if self.headers.get("Host", "").split(":")[0] in ("127.0.0.1", "localhost") and os.path.exists(arq):
+                b = open(arq, "rb").read(); self.send_response(200); self.send_header("Content-Type", "image/png"); self.send_header("Content-Length", str(len(b)))
+                self.send_header("Cache-Control", "max-age=300"); self.end_headers(); self.wfile.write(b); return
+            return self._json({"erro": "sem mapa.png"}, 404)
         if not self._ok_token(): return self._json({"erro": "token"}, 403)
         if u.path == "/api/estado":
             if q.get("forcar"): cache_vm["t"] = 0
             return self._json(estado())
+        if u.path == "/api/mapa":
+            ROSTER["ativo_ate"] = time.time() + 45
+            idade = round(time.time() - ROSTER["t"], 1) if ROSTER["t"] else None
+            return self._json({"dados": ROSTER["dados"], "idade": idade, "mapa": cfg.get("mapa") or {}, "pontos": cfg.get("pontos_mapa") or PONTOS_PADRAO})
         if u.path == "/api/tarefa":
             desde = int(q.get("desde", ["0"])[0])
             return self._json(tarefa_resumo() | {"linhas": TAREFA["linhas"][desde:]})
@@ -394,6 +525,27 @@ class H(BaseHTTPRequestHandler):
             with TRAVA_CFG: cfg["versao"] = versao; cfg["enviar_scripts"] = bool(d.get("enviar", True)); salvar_cfg(cfg)
             ok, msg = iniciar_tarefa("Subir servidor (%s)" % versao, t_subir(versao, cfg["enviar_scripts"]))
         elif a == "derrubar": ok, msg = iniciar_tarefa("Derrubar servidor", t_derrubar)
+        elif a == "backup": ok, msg = iniciar_tarefa("Baixar saves para este PC", t_backup)
+        elif a == "mapa_cfg":
+            try:
+                ref = d["ref"]; novo = {"esc": float(d["esc"]), "inv": bool(d.get("inv")), "ref": {k: float(ref[k]) for k in ("wx", "wy", "px", "py")}}
+                if not (0.05 <= novo["esc"] <= 20): raise ValueError("escala")
+            except Exception: return self._json({"erro": "calibracao invalida"}, 400)
+            with TRAVA_CFG: cfg["mapa"] = novo; salvar_cfg(cfg)
+            ok, msg = True, "calibracao salva"
+        elif a == "teleportar" and d.get("alvo"):
+            cmd = {"cmd": "teleportar", "alvo": str(d["alvo"])[:60]}
+            if d.get("para"): cmd["para"] = str(d["para"])[:60]
+            elif d.get("destino") == "woodberry": cmd["destino"] = "woodberry"
+            else:
+                try: cmd.update(x=float(d["x"]), y=float(d["y"]), z=float(d["z"]))
+                except Exception: return self._json({"erro": "destino invalido"}, 400)
+            ok, msg = iniciar_tarefa("Teleportar " + cmd["alvo"], t_comando(cmd))
+        elif a == "dinheiro" and d.get("alvo"):
+            try: valor = int(d.get("valor"))
+            except Exception: return self._json({"erro": "valor invalido"}, 400)
+            if not (1 <= valor <= 1000000): return self._json({"erro": "valor de 1 a 1.000.000"}, 400)
+            ok, msg = iniciar_tarefa("Dinheiro para " + str(d["alvo"])[:60], t_comando({"cmd": "dinheiro", "alvo": str(d["alvo"])[:60], "valor": valor}))
         elif a == "monitor" and d.get("id") in POR_ID:
             ok, msg = iniciar_tarefa(("Ligar " if d.get("ligar") else "Desligar ") + d["id"], t_monitor(d["id"], bool(d.get("ligar"))))
         else: return self._json({"erro": "acao invalida"}, 400)
@@ -405,6 +557,8 @@ def main():
         print("Configure o IP da VPS em", CFG); return
     if not os.path.exists(cfg["chave"]):
         print("Chave SSH nao encontrada:", cfg["chave"], "(ajuste 'chave' em", CFG + ")")
+    threading.Thread(target=auto_backup, daemon=True).start()
+    threading.Thread(target=_roster_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", int(cfg["porta"])), H)
     url = "http://127.0.0.1:%d/" % int(cfg["porta"])
     print("Painel em", url, "(feche esta janela para encerrar)")
